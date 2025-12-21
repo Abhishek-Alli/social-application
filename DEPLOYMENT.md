@@ -33,21 +33,45 @@ The code will work because:
 
 ### 3. Production Deployment (Vercel/Netlify/etc.)
 
-When deploying to production platforms:
+When deploying to production platforms, **YOU MUST SET ENVIRONMENT VARIABLES**:
 
 1. **Vercel:**
-   - Go to Project Settings → Environment Variables
-   - Add:
-     - `VITE_SUPABASE_URL` = `https://swhdqlsqkprycyxeattj.supabase.co`
-     - `VITE_SUPABASE_ANON_KEY` = `sb_publishable_u4IiPDFlyaM0BofTuQPUbQ_0W_p_d3b`
+   - Go to your project → Settings → Environment Variables
+   - Click "Add New"
+   - Add these variables:
+     ```
+     VITE_SUPABASE_URL = https://swhdqlsqkprycyxeattj.supabase.co
+     VITE_SUPABASE_ANON_KEY = sb_publishable_u4IiPDFlyaM0BofTuQPUbQ_0W_p_d3b
+     ```
+   - Select environment: **Production, Preview, Development** (all three)
+   - Click "Save"
+   - **Redeploy** your application after adding variables
 
 2. **Netlify:**
    - Go to Site Settings → Environment Variables
-   - Add the same variables
+   - Click "Add a variable"
+   - Add:
+     ```
+     VITE_SUPABASE_URL = https://swhdqlsqkprycyxeattj.supabase.co
+     VITE_SUPABASE_ANON_KEY = sb_publishable_u4IiPDFlyaM0BofTuQPUbQ_0W_p_d3b
+     ```
+   - Click "Save"
+   - **Redeploy** your site
 
 3. **Other Platforms:**
    - Add environment variables in your platform's settings
    - Use the same variable names: `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`
+   - **Important:** Make sure to redeploy after adding variables
+
+### ⚠️ Common Deployment Error Fix
+
+**Error:** `ERR_NAME_NOT_RESOLVED` or `your-project-id.supabase.co`
+
+**Solution:**
+1. Check that environment variables are set in your deployment platform
+2. Make sure variable names are exactly: `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`
+3. **Redeploy** after adding environment variables (they're only available at build time)
+4. Check browser console for configuration errors
 
 ### 4. Supabase Security
 

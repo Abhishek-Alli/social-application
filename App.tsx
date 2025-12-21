@@ -105,14 +105,16 @@ const App: React.FC = () => {
             telegramUserId: u.telegram_user_id || u.telegramUserId,
             telegramToken: u.telegram_token || u.telegramToken
           }));
-          console.log('Loaded users from Supabase:', mappedUsers);
+          console.log('✅ Loaded users from Supabase:', mappedUsers);
           setUsers(mappedUsers);
           localStorage.setItem('srj_users', JSON.stringify(mappedUsers));
         } else {
-          console.log('No users found in Supabase, using localStorage');
+          console.log('⚠️ No users found in Supabase, using localStorage');
         }
-      } catch (error) {
-        console.log('Failed to load users from Supabase, using localStorage:', error);
+      } catch (error: any) {
+        console.error('❌ Failed to load users from Supabase:', error);
+        console.log('📦 Falling back to localStorage');
+        // Don't throw - gracefully fall back to localStorage
       }
     };
     
