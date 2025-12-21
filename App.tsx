@@ -557,7 +557,7 @@ const App: React.FC = () => {
   const renderContent = () => {
     if (!currentUser && view !== 'profile') {
       return (
-        <div className="flex flex-col items-center justify-center py-20 animate-in fade-in">
+        <div className="flex flex-col items-center justify-center pt-8 pb-20 animate-in fade-in">
            <AuthView 
             currentUser={currentUser} 
             onLogin={handleLogin} 
@@ -708,9 +708,16 @@ const App: React.FC = () => {
               className="flex items-center gap-2 text-left group"
             >
               <div>
-                <h1 className="text-xl font-black text-slate-900 flex items-center gap-2 tracking-tighter italic">
-                  SRJ <span className="bg-orange-600 text-[8px] text-white px-2 py-0.5 rounded-full uppercase not-italic tracking-normal">Enterprise</span>
-                </h1>
+                <div className="flex items-center gap-2">
+                  <img 
+                    src="/app_logo/SRJ-SOCIAL.jpg" 
+                    alt="SRJ SOCIAL Logo" 
+                    className="w-8 h-8 object-contain rounded-lg"
+                  />
+                  <h1 className="text-xl font-black text-slate-900 flex items-center gap-2 tracking-tighter italic">
+                    SRJ <span className="bg-orange-600 text-[8px] text-white px-2 py-0.5 rounded-full uppercase not-italic tracking-normal">Enterprise</span>
+                  </h1>
+                </div>
                 <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest flex items-center gap-1">
                    {activeProject?.name || 'Loading Node...'} {currentUser?.role === Role.ADMIN && <ChevronDown size={10} className="text-orange-500" />}
                 </p>

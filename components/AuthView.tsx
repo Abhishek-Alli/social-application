@@ -371,12 +371,17 @@ export const AuthView: React.FC<AuthViewProps> = ({
 
   return (
     <div className="flex flex-col h-full p-8 animate-in fade-in duration-500 overflow-y-auto no-scrollbar">
-      <div className="flex-1 flex flex-col justify-center min-h-full py-10">
+      <div className="flex-1 flex flex-col justify-start min-h-full pt-32 pb-10">
         <div className="mb-10 text-center">
-          <div className="w-20 h-20 bg-orange-600 rounded-3xl flex items-center justify-center text-white mx-auto mb-6 shadow-2xl shadow-orange-200 rotate-3">
-            <ShieldCheck size={40} />
+          {/* SRJ SOCIAL Logo - Actual Image */}
+          <div className="w-48 h-48 mx-auto mb-8 flex items-center justify-center">
+            <img 
+              src="/app_logo/SRJ-SOCIAL.jpg" 
+              alt="SRJ SOCIAL Logo" 
+              className="w-full h-full object-contain rounded-2xl"
+              style={{maxWidth: '192px', maxHeight: '192px'}}
+            />
           </div>
-          <h2 className="text-3xl font-black text-slate-900 tracking-tighter italic">SRJ <span className="not-italic text-sm font-bold block text-orange-600 uppercase tracking-[0.2em] mt-1">Enterprise Portal</span></h2>
         </div>
 
         {isNew ? (
