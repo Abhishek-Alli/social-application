@@ -133,28 +133,11 @@ export const AuthView: React.FC<AuthViewProps> = ({
     return (
       <div className="flex flex-col p-6 space-y-8 animate-in fade-in duration-500 pb-32 no-scrollbar">
         {/* Digital Identity Card (3:4 Portrait Ratio) */}
-        <div className="relative mx-auto w-full max-w-[320px] aspect-[3/4] bg-white rounded-[2rem] shadow-2xl shadow-orange-900/10 border-4 border-white overflow-hidden flex flex-col group transition-all duration-500 hover:shadow-orange-600/20">
+        <div className="relative mx-auto w-full max-w-[320px] bg-white rounded-[2rem] shadow-2xl shadow-orange-900/10 border-4 border-orange-600 overflow-hidden flex flex-col group transition-all duration-500 hover:shadow-orange-600/20 min-h-[500px]">
           
-          <div className="h-24 bg-slate-950 relative overflow-hidden flex items-center justify-between px-6">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-orange-600 rounded-full -mr-16 -mt-16 opacity-20 blur-2xl" />
-            <div className="z-10">
-              <div className="flex items-center gap-1.5 mb-0.5">
-                <div className="bg-orange-600 p-1 rounded-md">
-                   <Shield className="text-white" size={14} fill="currentColor" />
-                </div>
-                <h2 className="text-white font-black italic tracking-tighter text-lg leading-none">SRJ</h2>
-              </div>
-              <p className="text-[7px] text-orange-500 font-black uppercase tracking-[0.2em] leading-none">World of Steel</p>
-            </div>
-            <div className="z-10 text-right">
-              <span className="block text-white text-[8px] font-black uppercase tracking-widest opacity-40">Official Identity</span>
-              <span className="block text-orange-600 text-[9px] font-black uppercase tracking-widest leading-none mt-0.5">Enterprise Node</span>
-            </div>
-          </div>
-
-          <div className="flex-1 bg-gradient-to-b from-slate-50 to-white flex flex-col items-center pt-8 px-6 text-center">
+          <div className="flex-1 bg-gradient-to-b from-slate-50 to-white flex flex-col items-center pt-8 px-6 pb-12 text-center">
             <div className="relative mb-4">
-              <div className="w-28 h-28 rounded-full border-[5px] border-white shadow-xl overflow-hidden bg-slate-100 flex items-center justify-center">
+              <div className="w-28 h-28 rounded-full border-[5px] border-orange-600 shadow-xl overflow-hidden bg-slate-100 flex items-center justify-center">
                 {currentUser.profilePhoto ? (
                   <img src={currentUser.profilePhoto} className="w-full h-full object-cover" alt="Identity" />
                 ) : (
@@ -171,7 +154,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                <span className="text-[9px] font-black text-orange-600 uppercase tracking-widest">{currentUser.designation || 'Specialist'}</span>
             </div>
 
-            <div className="w-full grid grid-cols-2 gap-y-4 gap-x-6 text-left border-t border-slate-100 pt-6">
+            <div className="w-full grid grid-cols-2 gap-y-4 gap-x-6 text-left border-t border-slate-100 pt-6 pb-6">
               <div className="space-y-0.5">
                 <span className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">Employee ID</span>
                 <span className="block text-[10px] font-bold text-slate-800 uppercase tracking-tight">{currentUser.employeeId || 'SRJ-NODE'}</span>
@@ -198,84 +181,6 @@ export const AuthView: React.FC<AuthViewProps> = ({
 
           </div>
         </div>
-
-        {/* Edit Form - Outside Card for Better Visibility */}
-        {isEditingProfile && (
-          <div className="w-full max-w-[320px] mx-auto bg-white rounded-2xl p-4 shadow-lg border border-slate-200 space-y-3">
-            <h3 className="text-sm font-bold text-slate-900 mb-3 uppercase tracking-widest">Edit Profile Details</h3>
-            <input
-              type="text"
-              value={editForm.name}
-              onChange={(e) => setEditForm(prev => ({ ...prev, name: e.target.value }))}
-              placeholder="Full Name"
-              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-            />
-            <input
-              type="email"
-              value={editForm.email}
-              onChange={(e) => setEditForm(prev => ({ ...prev, email: e.target.value }))}
-              placeholder="Email"
-              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-            />
-            <input
-              type="text"
-              value={editForm.employeeId}
-              onChange={(e) => setEditForm(prev => ({ ...prev, employeeId: e.target.value }))}
-              placeholder="Employee ID"
-              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-            />
-            <input
-              type="text"
-              value={editForm.department}
-              onChange={(e) => setEditForm(prev => ({ ...prev, department: e.target.value }))}
-              placeholder="Department"
-              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-            />
-            <input
-              type="text"
-              value={editForm.subDepartment}
-              onChange={(e) => setEditForm(prev => ({ ...prev, subDepartment: e.target.value }))}
-              placeholder="Sub Department"
-              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-            />
-            <input
-              type="text"
-              value={editForm.designation}
-              onChange={(e) => setEditForm(prev => ({ ...prev, designation: e.target.value }))}
-              placeholder="Designation"
-              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-            />
-            <input
-              type="text"
-              value={editForm.contactNo}
-              onChange={(e) => setEditForm(prev => ({ ...prev, contactNo: e.target.value }))}
-              placeholder="Contact Number"
-              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-            />
-            <input
-              type="date"
-              value={editForm.dob}
-              onChange={(e) => setEditForm(prev => ({ ...prev, dob: e.target.value }))}
-              placeholder="Date of Birth"
-              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-            />
-            <div className="flex gap-2 pt-2">
-              <button
-                onClick={handleSaveProfile}
-                className="flex-1 px-4 py-2 bg-orange-600 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-orange-700 transition-all flex items-center justify-center gap-2"
-              >
-                <Save size={14} />
-                Save
-              </button>
-              <button
-                onClick={handleCancelEdit}
-                className="flex-1 px-4 py-2 bg-slate-200 text-slate-700 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-slate-300 transition-all"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* Security Settings Section */}
         <div className="px-2 space-y-4">
