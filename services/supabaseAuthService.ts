@@ -4,11 +4,14 @@ import { supabase } from './supabaseService';
 export const supabaseAuthService = {
   // Sign up with email (triggers email verification automatically)
   async signUp(email: string, password: string, metadata?: { name?: string; username?: string }) {
+    // Use production URL if available, otherwise use current origin
+    const redirectUrl = import.meta.env.VITE_APP_URL || window.location.origin;
+    
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: `${redirectUrl}`,
         data: metadata // Additional user metadata
       }
     });
@@ -73,8 +76,11 @@ export const supabaseAuthService = {
 
   // Reset password (sends email)
   async resetPassword(email: string) {
+    // Use production URL if available, otherwise use current origin
+    const redirectUrl = import.meta.env.VITE_APP_URL || window.location.origin;
+    
     const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/reset-password`
+      redirectTo: `${redirectUrl}/auth/reset-password`
     });
     
     if (error) throw error;

@@ -608,11 +608,20 @@ const App: React.FC = () => {
   // Handle email link verification (called when user clicks link in email)
   const handleEmailLinkVerification = async () => {
     // Check if user clicked email verification link
+    // Supabase adds tokens to URL hash: #access_token=xxx&type=signup
     const hashParams = new URLSearchParams(window.location.hash.substring(1));
     const accessToken = hashParams.get('access_token');
     const type = hashParams.get('type');
     
-    if (accessToken && type === 'signup') {
+    // Also check query params (some email clients may convert hash to query)
+    const queryParams = new URLSearchParams(window.location.search);
+    const queryToken = queryParams.get('access_token');
+    const queryType = queryParams.get('type');
+    
+    const finalToken = accessToken || queryToken;
+    const finalType = type || queryType;
+    
+    if (finalToken && finalType === 'signup') {
       try {
         // Get session from Supabase
         const session = await supabaseAuthService.getSession();

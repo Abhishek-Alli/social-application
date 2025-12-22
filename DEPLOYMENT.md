@@ -42,10 +42,13 @@ When deploying to production platforms, **YOU MUST SET ENVIRONMENT VARIABLES**:
      ```
      VITE_SUPABASE_URL = https://swhdqlsqkprycyxeattj.supabase.co
      VITE_SUPABASE_ANON_KEY = sb_publishable_u4IiPDFlyaM0BofTuQPUbQ_0W_p_d3b
+     VITE_APP_URL = https://social-application-sk7a.vercel.app
      ```
    - Select environment: **Production, Preview, Development** (all three)
    - Click "Save"
    - **Redeploy** your application after adding variables
+   
+   **Important:** `VITE_APP_URL` is required for email verification links to work correctly!
 
 2. **Netlify:**
    - Go to Site Settings → Environment Variables
