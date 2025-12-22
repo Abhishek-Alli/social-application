@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Notification } from '../types';
-import { Bell, Check, Trash2, ListTodo, Megaphone, Info, Clock, CheckCircle2 } from 'lucide-react';
+import { Bell, Check, Trash2, ListTodo, Megaphone, Info, Clock, CheckCircle2, Phone, MessageCircle, FileText, Users, Mail, Heart } from 'lucide-react';
 
 interface NotificationsViewProps {
   notifications: Notification[];
@@ -21,6 +21,14 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({
       case 'task': return <ListTodo size={16} className="text-blue-500" />;
       case 'complaint': return <Megaphone size={16} className="text-orange-500" />;
       case 'update': return <CheckCircle2 size={16} className="text-emerald-500" />;
+      case 'call': return <Phone size={16} className="text-purple-500" />;
+      case 'message': return <MessageCircle size={16} className="text-indigo-500" />;
+      case 'post': return <FileText size={16} className="text-cyan-500" />;
+      case 'group': return <Users size={16} className="text-pink-500" />;
+      case 'note': return <FileText size={16} className="text-yellow-500" />;
+      case 'email': return <Mail size={16} className="text-red-500" />;
+      case 'like': return <Heart size={16} className="text-rose-500" />;
+      case 'comment': return <MessageCircle size={16} className="text-blue-500" />;
       default: return <Info size={16} className="text-slate-400" />;
     }
   };

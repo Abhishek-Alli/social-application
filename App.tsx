@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Task, Priority, ViewType, Note, Role, User, Complaint, ComplaintAttachment, Notification, Message, Group, MessageAttachment, Post, Comment, Project, Email } from './types';
+import { Task, Priority, ViewType, Note, Role, User, Complaint, ComplaintAttachment, Notification, Message, Group, MessageAttachment, Post, Comment, Project, Email, CallInfo } from './types';
 import { 
   userService, 
   projectService, 
@@ -91,25 +91,25 @@ const App: React.FC = () => {
 
   // Helper function to map Supabase data to TypeScript types
   const mapUserFromSupabase = (u: any): User => ({
-    id: u.id,
-    name: u.name,
-    email: u.email,
-    username: u.username,
-    role: u.role as Role,
-    parentId: u.parent_id || u.parentId,
-    projectId: u.project_id || u.projectId,
-    employeeId: u.employee_id || u.employeeId,
-    department: u.department,
-    subDepartment: u.sub_department || u.subDepartment,
-    designation: u.designation,
-    dob: u.dob,
-    contactNo: u.contact_no || u.contactNo,
-    profilePhoto: u.profile_photo || u.profilePhoto,
-    password: u.password,
-    isTwoStepEnabled: u.is_two_step_enabled !== undefined ? u.is_two_step_enabled : u.isTwoStepEnabled,
-    isEmailVerified: u.is_email_verified !== undefined ? u.is_email_verified : u.isEmailVerified,
-    telegramUserId: u.telegram_user_id || u.telegramUserId,
-    telegramToken: u.telegram_token || u.telegramToken
+            id: u.id,
+            name: u.name,
+            email: u.email,
+            username: u.username,
+            role: u.role as Role,
+            parentId: u.parent_id || u.parentId,
+            projectId: u.project_id || u.projectId,
+            employeeId: u.employee_id || u.employeeId,
+            department: u.department,
+            subDepartment: u.sub_department || u.subDepartment,
+            designation: u.designation,
+            dob: u.dob,
+            contactNo: u.contact_no || u.contactNo,
+            profilePhoto: u.profile_photo || u.profilePhoto,
+            password: u.password,
+            isTwoStepEnabled: u.is_two_step_enabled !== undefined ? u.is_two_step_enabled : u.isTwoStepEnabled,
+            isEmailVerified: u.is_email_verified !== undefined ? u.is_email_verified : u.isEmailVerified,
+            telegramUserId: u.telegram_user_id || u.telegramUserId,
+            telegramToken: u.telegram_token || u.telegramToken
   });
 
   // Load initial data from Supabase
@@ -151,31 +151,33 @@ const App: React.FC = () => {
         }
       } catch (error) {
         console.error('Failed to load initial data from Supabase:', error);
-        // Fallback to localStorage if Supabase fails
-        const savedUsers = localStorage.getItem('srj_users');
-        const savedProjects = localStorage.getItem('srj_projects');
-        if (savedUsers) setUsers(JSON.parse(savedUsers));
-        if (savedProjects) {
-          const parsed = JSON.parse(savedProjects);
-          setProjects(parsed);
-          if (parsed[0]?.id) setCurrentProjectId(parsed[0].id);
-        }
+        alert('Failed to connect to database. Please check your internet connection.');
       }
     };
 
     loadInitialData();
   }, []);
 
-  // Load current user from localStorage on mount
+  // Load current user from sessionStorage on mount (for session persistence only)
   useEffect(() => {
-    const savedCurrentUser = localStorage.getItem('srj_current_user');
+    const savedCurrentUser = sessionStorage.getItem('srj_current_user');
     if (savedCurrentUser) {
       try {
         const user = JSON.parse(savedCurrentUser);
-        setCurrentUser(user);
-        if (user.projectId) setCurrentProjectId(user.projectId);
+        // Verify user still exists in database
+        userService.getById(user.id).then(dbUser => {
+          if (dbUser) {
+            setCurrentUser(user);
+            if (user.projectId) setCurrentProjectId(user.projectId);
+          } else {
+            sessionStorage.removeItem('srj_current_user');
+          }
+        }).catch(() => {
+          sessionStorage.removeItem('srj_current_user');
+        });
       } catch (error) {
         console.error('Failed to parse saved user:', error);
+        sessionStorage.removeItem('srj_current_user');
       }
     }
   }, []);
@@ -555,14 +557,22 @@ const App: React.FC = () => {
     // Cleanup subscriptions on unmount or project change
     return () => {
       subscriptions.forEach(sub => {
-        supabase.removeChannel(sub);
+        try {
+          supabase.removeChannel(sub);
+        } catch (error) {
+          console.error('Error removing channel:', error);
+        }
       });
     };
   }, [currentProjectId, currentUser]);
 
-  // Keep localStorage sync only for current user (for offline persistence)
+  // Keep sessionStorage sync only for current user (for session persistence only)
   useEffect(() => { 
-    if (currentUser) localStorage.setItem('srj_current_user', JSON.stringify(currentUser));
+    if (currentUser) {
+      sessionStorage.setItem('srj_current_user', JSON.stringify(currentUser));
+    } else {
+      sessionStorage.removeItem('srj_current_user');
+    }
   }, [currentUser]);
 
   // Scoped Data Hooks
@@ -595,29 +605,29 @@ const App: React.FC = () => {
     } catch (error) {
       console.error('Failed to create notification:', error);
       // Fallback: add to local state if database fails
-      const newNotif: Notification = {
-        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-        projectId: currentProjectId,
-        userId,
-        title,
-        message,
-        type,
-        read: false,
-        createdAt: new Date().toISOString(),
-        linkTo
-      };
-      setNotifications(prev => [newNotif, ...prev]);
+    const newNotif: Notification = {
+      id: Date.now().toString() + Math.random().toString(36).substring(2, 11),
+      projectId: currentProjectId,
+      userId,
+      title,
+      message,
+      type,
+      read: false,
+      createdAt: new Date().toISOString(),
+      linkTo
+    };
+    setNotifications(prev => [newNotif, ...prev]);
     }
   };
 
   const handleCreateProject = async (data: Omit<Project, 'id' | 'createdAt'>) => {
     try {
       const newProject = await projectService.create({
-        ...data,
+      ...data,
         domain: data.domain || 'srj.com'
       });
-      setProjects(prev => [...prev, newProject]);
-      setCurrentProjectId(newProject.id);
+    setProjects(prev => [...prev, newProject]);
+    setCurrentProjectId(newProject.id);
     } catch (error) {
       console.error('Failed to create project:', error);
       alert('Failed to create project. Please try again.');
@@ -628,11 +638,11 @@ const App: React.FC = () => {
     if (id === 'p_default') return alert("Cannot delete main node.");
     try {
       await projectService.delete(id);
-      setProjects(prev => prev.filter(p => p.id !== id));
-      setTasks(prev => prev.filter(t => t.projectId !== id));
-      setPosts(prev => prev.filter(p => p.projectId !== id));
-      setUsers(prev => prev.filter(u => u.projectId !== id || u.role === Role.ADMIN));
-      if (currentProjectId === id) setCurrentProjectId('p_default');
+    setProjects(prev => prev.filter(p => p.id !== id));
+    setTasks(prev => prev.filter(t => t.projectId !== id));
+    setPosts(prev => prev.filter(p => p.projectId !== id));
+    setUsers(prev => prev.filter(u => u.projectId !== id || u.role === Role.ADMIN));
+    if (currentProjectId === id) setCurrentProjectId('p_default');
     } catch (error) {
       console.error('Failed to delete project:', error);
       alert('Failed to delete project. Please try again.');
@@ -665,18 +675,9 @@ const App: React.FC = () => {
           });
         }
       } catch (error) {
-        console.log('Supabase error, trying localStorage:', error);
-        // Fallback to localStorage
-        user = users.find(u => 
-          u.username.toLowerCase() === cleanUsername
-        ) || null;
-      }
-      
-      // If not found in Supabase, try localStorage
-      if (!user) {
-        user = users.find(u => 
-          u.username.toLowerCase() === cleanUsername
-        ) || null;
+        console.error('Supabase error during login:', error);
+        alert('Failed to connect to database. Please check your internet connection.');
+        return;
       }
 
       if (user) {
@@ -712,7 +713,7 @@ const App: React.FC = () => {
   const completeLogin = (user: User) => {
     setCurrentUser(user);
     if (user.projectId) setCurrentProjectId(user.projectId);
-    localStorage.setItem('srj_current_user', JSON.stringify(user));
+    sessionStorage.setItem('srj_current_user', JSON.stringify(user));
     setNeedsTwoStep(false);
     setPendingUser(null);
     setView('tasks');
@@ -720,7 +721,7 @@ const App: React.FC = () => {
 
   const handleLogout = () => {
     setCurrentUser(null);
-    localStorage.removeItem('srj_current_user');
+    sessionStorage.removeItem('srj_current_user');
     setNeedsTwoStep(false);
     setPendingUser(null);
     setView('profile');
@@ -730,8 +731,8 @@ const App: React.FC = () => {
     if (!currentUser) return;
     try {
       const updatedUser = await userService.update(currentUser.id, updates);
-      setCurrentUser(updatedUser);
-      setUsers(prev => prev.map(u => u.id === currentUser.id ? updatedUser : u));
+    setCurrentUser(updatedUser);
+    setUsers(prev => prev.map(u => u.id === currentUser.id ? updatedUser : u));
     } catch (error) {
       console.error('Failed to update profile:', error);
       alert('Failed to update profile. Please try again.');
@@ -742,18 +743,18 @@ const App: React.FC = () => {
     if (!currentProjectId) return;
     try {
       const newUser = await userService.create({
-        name: userData.name || 'Unknown',
-        email: userData.email || '',
-        username: userData.username || 'user_' + Date.now(),
-        role: Role.EMPLOYEE,
-        parentId: 'u1',
-        projectId: currentProjectId,
-        isEmailVerified: false,
-        isTwoStepEnabled: false,
-        ...userData
+      name: userData.name || 'Unknown',
+      email: userData.email || '',
+      username: userData.username || 'user_' + Date.now(),
+      role: Role.EMPLOYEE,
+      parentId: 'u1',
+      projectId: currentProjectId,
+      isEmailVerified: false,
+      isTwoStepEnabled: false,
+      ...userData
       });
-      setUsers(prev => [...prev, newUser]);
-      alert("Onboarding request submitted. Use your credentials to log in.");
+    setUsers(prev => [...prev, newUser]);
+    alert("Onboarding request submitted. Use your credentials to log in.");
     } catch (error) {
       console.error('Failed to register user:', error);
       alert('Failed to register. Please try again.');
@@ -764,36 +765,36 @@ const App: React.FC = () => {
     if (!currentUser || !currentProjectId) return;
     try {
       const newEmail = await emailService.create({
-        projectId: currentProjectId,
-        senderId: currentUser.id,
-        senderEmail: currentUser.email,
-        read: false,
-        starred: false,
-        ...data
+      projectId: currentProjectId,
+      senderId: currentUser.id,
+      senderEmail: currentUser.email,
+      read: false,
+      starred: false,
+      ...data
       });
-      setEmails(prev => [...prev, newEmail]);
-      
-      // Notify primary recipient
-      const recipient = users.find(u => u.email === data.receiverEmail);
-      if (recipient) {
+    setEmails(prev => [...prev, newEmail]);
+    
+    // Notify primary recipient
+    const recipient = users.find(u => u.email === data.receiverEmail);
+    if (recipient) {
         await addNotification(recipient.id, "New Internal Mail", `Subject: ${data.subject}`, 'update', 'emails');
-      }
+    }
 
-      // Notify CC recipients
-      if (data.cc) {
+    // Notify CC recipients
+    if (data.cc) {
         for (const ccEmail of data.cc) {
-          const ccUser = users.find(u => u.email === ccEmail);
-          if (ccUser) {
+        const ccUser = users.find(u => u.email === ccEmail);
+        if (ccUser) {
             await addNotification(ccUser.id, "CC'd on Internal Mail", `Subject: ${data.subject}`, 'update', 'emails');
-          }
         }
-      }
+        }
+    }
 
       // BCC recipients
-      if (data.bcc) {
+    if (data.bcc) {
         for (const bccEmail of data.bcc) {
-          const bccUser = users.find(u => u.email === bccEmail);
-          if (bccUser) {
+        const bccUser = users.find(u => u.email === bccEmail);
+        if (bccUser) {
             await addNotification(bccUser.id, "BCC'd on Internal Mail", `Subject: ${data.subject}`, 'update', 'emails');
           }
         }
@@ -808,21 +809,34 @@ const App: React.FC = () => {
     if (!currentUser || !currentProjectId) return;
     try {
       await postService.create({
-        projectId: currentProjectId,
-        userId: currentUser.id,
-        userName: currentUser.name,
-        userUsername: currentUser.username,
-        text: data.text,
-        image: data.image,
-        video: data.video,
-        ratio: data.ratio,
-        likes: [],
-        mentions: [],
-        hashtags: [],
+      projectId: currentProjectId,
+      userId: currentUser.id,
+      userName: currentUser.name,
+      userUsername: currentUser.username,
+      text: data.text,
+      image: data.image,
+      video: data.video,
+      ratio: data.ratio,
+      likes: [],
+      mentions: [],
+      hashtags: [],
         comments: []
       });
+      
+      // Notify all users in the project about new post
+      const projectUsers = users.filter(u => u.projectId === currentProjectId && u.id !== currentUser.id);
+      for (const user of projectUsers) {
+        await addNotification(
+          user.id,
+          'New Post',
+          `${currentUser.name} shared a new post`,
+          'post',
+          'feed'
+        );
+      }
+      
       // Real-time subscription will update the state automatically
-      setView('feed');
+    setView('feed');
     } catch (error) {
       console.error('Failed to create post:', error);
       alert('Failed to create post. Please try again.');
@@ -841,20 +855,32 @@ const App: React.FC = () => {
         : [...post.likes, currentUser.id];
       
       await postService.update(postId, { likes: newLikes });
+      
+      // Notify post owner when someone likes their post (only if it's a new like)
+      if (!alreadyLiked && post.userId !== currentUser.id) {
+        await addNotification(
+          post.userId,
+          'New Like',
+          `${currentUser.name} liked your post`,
+          'like',
+          'feed'
+        );
+      }
+      
       // Real-time subscription will update the state automatically
     } catch (error) {
       console.error('Failed to like post:', error);
       // Fallback: update local state
-      setPosts(prev => prev.map(p => {
-        if (p.id === postId) {
-          const alreadyLiked = p.likes.includes(currentUser.id);
-          const newLikes = alreadyLiked 
-            ? p.likes.filter(id => id !== currentUser.id)
-            : [...p.likes, currentUser.id];
-          return { ...p, likes: newLikes };
-        }
-        return p;
-      }));
+    setPosts(prev => prev.map(p => {
+      if (p.id === postId) {
+        const alreadyLiked = p.likes.includes(currentUser.id);
+        const newLikes = alreadyLiked 
+          ? p.likes.filter(id => id !== currentUser.id)
+          : [...p.likes, currentUser.id];
+        return { ...p, likes: newLikes };
+      }
+      return p;
+    }));
     }
   };
 
@@ -875,18 +901,49 @@ const App: React.FC = () => {
       await postService.update(postId, { 
         comments: [...(post.comments || []), newComment] 
       });
+      
+      // Notify post owner when someone comments on their post
+      if (post.userId !== currentUser.id) {
+        await addNotification(
+          post.userId,
+          'New Comment',
+          `${currentUser.name} commented on your post: ${text.length > 50 ? text.substring(0, 50) + '...' : text}`,
+          'comment',
+          'feed'
+        );
+      }
+      
       // Real-time subscription will update the state automatically
     } catch (error) {
       console.error('Failed to add comment:', error);
       // Fallback: update local state
-      const newComment: Comment = {
-        id: Date.now().toString(),
-        userId: currentUser.id,
-        userName: currentUser.name,
-        text,
-        createdAt: new Date().toISOString()
-      };
-      setPosts(prev => prev.map(p => p.id === postId ? { ...p, comments: [...(p.comments || []), newComment] } : p));
+    const newComment: Comment = {
+      id: Date.now().toString(),
+      userId: currentUser.id,
+      userName: currentUser.name,
+      text,
+      createdAt: new Date().toISOString()
+    };
+    setPosts(prev => prev.map(p => p.id === postId ? { ...p, comments: [...(p.comments || []), newComment] } : p));
+    }
+  };
+
+  const handleDeletePost = async (postId: string) => {
+    try {
+      // Optimistically remove from UI immediately
+      setPosts(prev => prev.filter(p => p.id !== postId));
+      
+      // Delete from database
+      await postService.delete(postId);
+      // Real-time subscription will also update, but we've already updated locally
+    } catch (error) {
+      console.error('Failed to delete post:', error);
+      // Re-add the post if delete failed
+      const post = posts.find(p => p.id === postId);
+      if (post) {
+        setPosts(prev => [...prev, post]);
+      }
+      alert('Failed to delete post. Please try again.');
     }
   };
 
@@ -910,17 +967,17 @@ const App: React.FC = () => {
     if (!currentUser || !currentProjectId) return;
     try {
       const newUser = await userService.create({
-        name: userData.name || 'New Personnel',
-        email: userData.email || '',
-        username: userData.username || 'user_' + Date.now(),
-        role: userData.role || Role.EMPLOYEE,
-        parentId: currentUser.id,
-        projectId: currentProjectId,
-        isEmailVerified: false,
-        isTwoStepEnabled: false,
-        ...userData
+      name: userData.name || 'New Personnel',
+      email: userData.email || '',
+      username: userData.username || 'user_' + Date.now(),
+      role: userData.role || Role.EMPLOYEE,
+      parentId: currentUser.id,
+      projectId: currentProjectId,
+      isEmailVerified: false,
+      isTwoStepEnabled: false,
+      ...userData
       });
-      setUsers(prev => [...prev, newUser]);
+    setUsers(prev => [...prev, newUser]);
     } catch (error) {
       console.error('Failed to add subordinate:', error);
       alert('Failed to add subordinate. Please try again.');
@@ -931,17 +988,30 @@ const App: React.FC = () => {
     if (!currentUser || !currentProjectId) return;
     try {
       await taskService.create({
-        projectId: currentProjectId,
-        title: data.title,
-        description: data.description,
-        priority: data.priority,
-        category: data.category,
-        dueDate: data.dueDate,
-        completed: false,
-        subTasks: [],
-        assignedBy: currentUser.id,
-        assignedTo: data.assignedTo || currentUser.id
+      projectId: currentProjectId,
+      title: data.title,
+      description: data.description,
+      priority: data.priority,
+      category: data.category,
+      dueDate: data.dueDate,
+      completed: false,
+      subTasks: [],
+      assignedBy: currentUser.id,
+      assignedTo: data.assignedTo || currentUser.id
       });
+      
+      // Notify the assigned user about the new task
+      const assignedUserId = data.assignedTo || currentUser.id;
+      if (assignedUserId !== currentUser.id) {
+        await addNotification(
+          assignedUserId,
+          'New Task Assigned',
+          `You have been assigned a new task: ${data.title}`,
+          'task',
+          'tasks'
+        );
+      }
+      
       // Real-time subscription will update the state automatically
     } catch (error) {
       console.error('Failed to create task:', error);
@@ -950,16 +1020,29 @@ const App: React.FC = () => {
   };
 
   const addNote = async (data: any) => {
-    if (!currentProjectId) return;
+    if (!currentProjectId || !currentUser) return;
     try {
       await noteService.create({
-        projectId: currentProjectId,
-        title: data.title,
-        content: data.content,
+      projectId: currentProjectId,
+      title: data.title,
+      content: data.content,
         color: data.color
       });
+      
+      // Notify all users in the project about new note
+      const projectUsers = users.filter(u => u.projectId === currentProjectId && u.id !== currentUser.id);
+      for (const user of projectUsers) {
+        await addNotification(
+          user.id,
+          'New Note Created',
+          `${currentUser.name} created a new note: ${data.title}`,
+          'note',
+          'notes'
+        );
+      }
+      
       // Real-time subscription will update the state automatically
-      setView('notes');
+    setView('notes');
     } catch (error) {
       console.error('Failed to create note:', error);
       alert('Failed to create note. Please try again.');
@@ -967,10 +1050,27 @@ const App: React.FC = () => {
   };
 
   const handleToggleTask = async (taskId: string) => {
+    if (!currentUser) return;
     try {
       const task = tasks.find(t => t.id === taskId);
       if (!task) return;
-      await taskService.update(taskId, { completed: !task.completed });
+      const newCompletedStatus = !task.completed;
+      await taskService.update(taskId, { completed: newCompletedStatus });
+      
+      // Notify task assigner when task is completed
+      if (newCompletedStatus && task.assignedBy && task.assignedBy !== currentUser.id) {
+        const assigner = users.find(u => u.id === task.assignedBy);
+        if (assigner) {
+          await addNotification(
+            task.assignedBy,
+            'Task Completed',
+            `${currentUser.name} completed the task: ${task.title}`,
+            'task',
+            'tasks'
+          );
+        }
+      }
+      
       // Real-time subscription will update the state automatically
     } catch (error) {
       console.error('Failed to toggle task:', error);
@@ -1036,6 +1136,23 @@ const App: React.FC = () => {
         status: 'pending',
         attachment
       });
+      
+      // Notify admins and management about new complaint
+      const adminsAndManagement = users.filter(u => 
+        u.projectId === currentProjectId && 
+        (u.role === Role.ADMIN || u.role === Role.MANAGEMENT) &&
+        u.id !== currentUser.id
+      );
+      for (const admin of adminsAndManagement) {
+        await addNotification(
+          admin.id,
+          'New Complaint',
+          `${currentUser.name} submitted a complaint: ${subject}`,
+          'complaint',
+          'complaints'
+        );
+      }
+      
       // Real-time subscription will update the state automatically
     } catch (error) {
       console.error('Failed to submit complaint:', error);
@@ -1066,6 +1183,38 @@ const App: React.FC = () => {
         status: 'sent',
         replyToId
       });
+      
+      // Notify receiver for direct messages
+      if (receiverId && receiverId !== currentUser.id) {
+        const receiver = users.find(u => u.id === receiverId);
+        if (receiver) {
+          await addNotification(
+            receiverId,
+            'New Message',
+            `${currentUser.name}: ${text.length > 50 ? text.substring(0, 50) + '...' : text}`,
+            'message',
+            'chat'
+          );
+        }
+      }
+      
+      // Notify all group members for group messages
+      if (groupId) {
+        const group = groups.find(g => g.id === groupId);
+        if (group) {
+          const otherMembers = group.members.filter(memberId => memberId !== currentUser.id);
+          for (const memberId of otherMembers) {
+            await addNotification(
+              memberId,
+              `New Message in ${group.name}`,
+              `${currentUser.name}: ${text.length > 50 ? text.substring(0, 50) + '...' : text}`,
+              'message',
+              'chat'
+            );
+          }
+        }
+      }
+      
       // Real-time subscription will update the state automatically
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -1075,11 +1224,91 @@ const App: React.FC = () => {
 
   const handleDeleteMessage = async (messageId: string) => {
     try {
+      console.log('Deleting message:', messageId);
+      
+      // Optimistically remove from UI immediately
+      setMessages(prev => {
+        const filtered = prev.filter(m => m.id !== messageId);
+        console.log('Messages after local delete:', filtered.length);
+        return filtered;
+      });
+      
+      // Delete from database
       await messageService.delete(messageId);
-      // Real-time subscription will update the state automatically
+      console.log('Message deleted from database successfully');
+      // Real-time subscription will also update, but we've already updated locally
     } catch (error) {
       console.error('Failed to delete message:', error);
-      alert('Failed to delete message. Please try again.');
+      // Re-add the message if delete failed
+      const message = messages.find(m => m.id === messageId);
+      if (message) {
+        setMessages(prev => [...prev, message]);
+      }
+      alert('Failed to delete message. Please check console for details.');
+    }
+  };
+
+  const handleStartCall = async (type: 'audio' | 'video', targetId: string, isGroup: boolean) => {
+    if (!currentUser || !currentProjectId) return;
+    
+    try {
+      const callInfo: CallInfo = {
+        id: 'call_' + Date.now(),
+        type,
+        status: 'active',
+        startedBy: currentUser.id,
+        groupId: isGroup ? targetId : undefined
+      };
+
+      // If it's a group call, update the group's active_call
+      if (isGroup) {
+        const group = groups.find(g => g.id === targetId);
+        if (group) {
+          await groupService.update(targetId, { activeCall: callInfo });
+        }
+      } else {
+        // For direct calls, create a message with call info
+        await messageService.create({
+          projectId: currentProjectId,
+          senderId: currentUser.id,
+          receiverId: targetId,
+          text: `${type === 'video' ? 'Video' : 'Audio'} call started`,
+          callInfo,
+          status: 'sent'
+        });
+      }
+
+      // Notify the other user
+      if (!isGroup) {
+        const targetUser = users.find(u => u.id === targetId);
+        if (targetUser) {
+          await addNotification(
+            targetUser.id,
+            `Incoming ${type === 'video' ? 'Video' : 'Audio'} Call`,
+            `${currentUser.name} is calling you`,
+            'call',
+            'chat'
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Failed to start call:', error);
+      alert('Failed to start call. Please try again.');
+    }
+  };
+
+  const handleEndCall = async (callId: string) => {
+    try {
+      // Find and end the call in groups
+      const groupWithCall = groups.find(g => g.activeCall?.id === callId);
+      if (groupWithCall) {
+        await groupService.update(groupWithCall.id, { activeCall: null });
+      }
+
+      // Note: For direct calls, the call info is in messages
+      // You might want to update the message status to 'ended' if needed
+    } catch (error) {
+      console.error('Failed to end call:', error);
     }
   };
 
@@ -1093,6 +1322,19 @@ const App: React.FC = () => {
         createdBy: currentUser.id,
         members: [currentUser.id]
       });
+      
+      // Notify all users in the project about new group
+      const projectUsers = users.filter(u => u.projectId === currentProjectId && u.id !== currentUser.id);
+      for (const user of projectUsers) {
+        await addNotification(
+          user.id,
+          'New Group Created',
+          `${currentUser.name} created a new group: ${name}`,
+          'group',
+          'chat'
+        );
+      }
+      
       // Real-time subscription will update the state automatically
     } catch (error) {
       console.error('Failed to create group:', error);
@@ -1105,12 +1347,33 @@ const App: React.FC = () => {
     try {
       const group = groups.find(g => g.id === groupId);
       if (!group) return;
-      const updatedMembers = [...group.members, currentUser.id];
-      await groupService.update(groupId, { members: updatedMembers });
+      
+      if (group.members.includes(currentUser.id)) {
+        // Leave group
+        await groupService.update(groupId, {
+          members: group.members.filter(id => id !== currentUser.id)
+        });
+      } else {
+        // Join group
+        const updatedMembers = [...group.members, currentUser.id];
+        await groupService.update(groupId, { members: updatedMembers });
+        
+        // Notify group creator and other members about new member
+        const otherMembers = group.members.filter(id => id !== currentUser.id);
+        for (const memberId of otherMembers) {
+          await addNotification(
+            memberId,
+            'New Group Member',
+            `${currentUser.name} joined the group ${group.name}`,
+            'group',
+            'chat'
+          );
+        }
+      }
       // Real-time subscription will update the state automatically
     } catch (error) {
-      console.error('Failed to join group:', error);
-      alert('Failed to join group. Please try again.');
+      console.error('Failed to join/leave group:', error);
+      alert('Failed to join/leave group. Please try again.');
     }
   };
 
@@ -1222,6 +1485,8 @@ const App: React.FC = () => {
           onAddSubordinate={addSubordinate}
           onRegister={handleRegister}
           needsTwoStep={needsTwoStep}
+          userPosts={scopedPosts.filter(p => p.userId === currentUser?.id)}
+          onDeletePost={handleDeletePost}
         />;
       case 'emails':
         return currentUser ? <EmailsView 
@@ -1250,8 +1515,8 @@ const App: React.FC = () => {
           onDeleteMessage={handleDeleteMessage}
           onCreateGroup={handleCreateGroup}
           onJoinGroup={handleJoinGroup}
-          onStartCall={() => {}}
-          onEndCall={() => {}}
+          onStartCall={handleStartCall}
+          onEndCall={handleEndCall}
         /> : null;
       case 'feed':
         return currentUser ? <FeedView 
@@ -1261,6 +1526,7 @@ const App: React.FC = () => {
           onLike={handleLikePost}
           onComment={handleCommentPost}
           onShare={handleSharePost}
+          onDelete={handleDeletePost}
         /> : null;
       case 'notifications':
         return currentUser ? (

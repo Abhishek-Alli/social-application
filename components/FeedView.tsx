@@ -1,7 +1,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { Post, User, Comment } from '../types';
-import { Heart, MessageSquare, Share2, MoreHorizontal, User as UserIcon, Send, X } from 'lucide-react';
+import { Heart, MessageSquare, Share2, MoreHorizontal, User as UserIcon, Send, X, Trash2 } from 'lucide-react';
 
 interface FeedViewProps {
   posts: Post[];
@@ -10,9 +10,10 @@ interface FeedViewProps {
   onLike: (postId: string) => void;
   onComment: (postId: string, text: string) => void;
   onShare: (postId: string) => void;
+  onDelete?: (postId: string) => void;
 }
 
-export const FeedView: React.FC<FeedViewProps> = ({ posts, currentUser, allUsers, onLike, onComment, onShare }) => {
+export const FeedView: React.FC<FeedViewProps> = ({ posts, currentUser, allUsers, onLike, onComment, onShare, onDelete }) => {
   const [commentingOn, setCommentingOn] = useState<string | null>(null);
   const [commentText, setCommentText] = useState('');
 
@@ -67,25 +68,38 @@ export const FeedView: React.FC<FeedViewProps> = ({ posts, currentUser, allUsers
                   <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">@{post.userUsername}</p>
                 </div>
               </div>
-              <button className="text-slate-400 p-2"><MoreHorizontal size={18} /></button>
+              <div className="flex items-center gap-1">
+                {onDelete && (post.userId === currentUser.id || currentUser.role === 'admin') && (
+                  <button 
+                    onClick={() => {
+                      if (window.confirm('Are you sure you want to delete this post?')) {
+                        onDelete(post.id);
+                      }
+                    }}
+                    className="text-rose-500 hover:text-rose-700 p-2 transition-colors"
+                    title="Delete Post"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                )}
+                <button className="text-slate-400 p-2"><MoreHorizontal size={18} /></button>
+              </div>
             </div>
 
-            <div className={`w-full bg-slate-900 flex items-center justify-center relative ${ratioClass}`}>
-              {post.video ? (
-                <video src={post.video} className="w-full h-full object-cover" controls loop playsInline />
-              ) : post.image ? (
-                <img src={post.image} alt="Post content" className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full bg-orange-50 flex items-center justify-center p-8 text-center italic text-slate-400 text-sm">
-                  {post.text.substring(0, 100)}...
-                </div>
-              )}
-              {post.video && (
-                <div className="absolute top-4 left-4 bg-black/40 backdrop-blur-md px-2 py-0.5 rounded-full text-[8px] text-white font-black uppercase tracking-widest pointer-events-none">
-                  Reel
-                </div>
-              )}
-            </div>
+            {(post.image || post.video) && (
+              <div className={`w-full bg-slate-900 flex items-center justify-center relative ${ratioClass}`}>
+                {post.video ? (
+                  <video src={post.video} className="w-full h-full object-cover" controls loop playsInline />
+                ) : post.image ? (
+                  <img src={post.image} alt="Post content" className="w-full h-full object-cover" />
+                ) : null}
+                {post.video && (
+                  <div className="absolute top-4 left-4 bg-black/40 backdrop-blur-md px-2 py-0.5 rounded-full text-[8px] text-white font-black uppercase tracking-widest pointer-events-none">
+                    Reel
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="p-4">
               <p className="text-sm text-slate-700 leading-relaxed mb-4">

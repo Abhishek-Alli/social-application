@@ -1,6 +1,8 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { User, Message, Group, Role, MessageAttachment, CallInfo } from '../types';
+import { WebRTCService } from '../services/webrtcService';
+import { supabase } from '../services/supabaseService';
 import { 
   Search, Send, ArrowLeft, User as UserIcon, MessageCircle, 
   Users, Plus, Hash, Trash2, Paperclip, Video, Phone, 
@@ -44,15 +46,146 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const [attachment, setAttachment] = useState<MessageAttachment | null>(null);
   const [showCallOverlay, setShowCallOverlay] = useState<CallInfo | null>(null);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [incomingCall, setIncomingCall] = useState<{ from: string; callId: string; type: 'audio' | 'video' } | null>(null);
+  const [isCallActive, setIsCallActive] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isVideoOff, setIsVideoOff] = useState(false);
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const webrtcRef = useRef<WebRTCService | null>(null);
+  const signalingChannelRef = useRef<any>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [activeChatUser, activeGroup, messages]);
+
+  // Set up WebRTC and signaling
+  useEffect(() => {
+    if (!currentUser) return;
+
+    // Set up Supabase realtime channel for call signaling
+    const channel = supabase.channel(`calls_${currentUser.id}`)
+      .on('broadcast', { event: 'call-signal' }, (payload) => {
+        handleCallSignal(payload.payload);
+      })
+      .subscribe();
+
+    signalingChannelRef.current = channel;
+
+    return () => {
+      if (webrtcRef.current) {
+        webrtcRef.current.endCall();
+      }
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser]);
+
+  // Update video streams when WebRTC streams are available
+  useEffect(() => {
+    if (webrtcRef.current && localVideoRef.current) {
+      const localStream = webrtcRef.current.getLocalStream();
+      if (localStream && localVideoRef.current) {
+        localVideoRef.current.srcObject = localStream;
+      }
+    }
+
+    if (webrtcRef.current && remoteVideoRef.current) {
+      webrtcRef.current.setOnRemoteStream((stream) => {
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = stream;
+        }
+      });
+    }
+  }, [isCallActive]);
+
+  const sendSignal = (type: string, to: string, data: any, callId?: string) => {
+    if (signalingChannelRef.current && currentUser) {
+      signalingChannelRef.current.send({
+        type: 'broadcast',
+        event: 'call-signal',
+        payload: {
+          type,
+          from: currentUser.id,
+          to,
+          data,
+          callId
+        }
+      });
+    }
+  };
+
+  const handleCallSignal = async (signal: any) => {
+    // Only process signals meant for current user
+    if (!currentUser || signal.to !== currentUser.id) return;
+    if (!webrtcRef.current && signal.type !== 'call-request') return;
+
+    try {
+      switch (signal.type) {
+        case 'call-request':
+          // Incoming call - only show if not already in a call
+          if (!showCallOverlay && !incomingCall) {
+            setIncomingCall({
+              from: signal.from,
+              callId: signal.callId || 'call_' + Date.now(),
+              type: signal.data?.type || 'audio'
+            });
+          }
+          break;
+
+        case 'call-accepted':
+          // Call was accepted, we already sent offer in handleCall
+          // Just wait for answer
+          break;
+
+        case 'offer':
+          // Received offer, create answer (for incoming calls that we answered)
+          if (webrtcRef.current && showCallOverlay && signal.data?.offer) {
+            try {
+              const answer = await webrtcRef.current.setRemoteOffer(signal.data.offer);
+              sendSignal('answer', signal.from, { answer }, signal.callId);
+            } catch (error) {
+              console.error('Error handling offer:', error);
+            }
+          }
+          break;
+
+        case 'answer':
+          // Received answer
+          if (webrtcRef.current && signal.data?.answer) {
+            try {
+              await webrtcRef.current.setRemoteAnswer(signal.data.answer);
+            } catch (error) {
+              console.error('Error handling answer:', error);
+            }
+          }
+          break;
+
+        case 'ice-candidate':
+          // Received ICE candidate
+          if (webrtcRef.current && signal.data?.candidate) {
+            try {
+              await webrtcRef.current.addIceCandidate(signal.data.candidate);
+            } catch (error) {
+              console.error('Error adding ICE candidate:', error);
+            }
+          }
+          break;
+
+        case 'call-ended':
+        case 'call-rejected':
+          // Call ended or rejected
+          endCall();
+          break;
+      }
+    } catch (error) {
+      console.error('Error handling call signal:', error);
+    }
+  };
 
   const canCreateGroup = currentUser.role === Role.ADMIN || 
                          currentUser.role === Role.MANAGEMENT || 
@@ -128,17 +261,178 @@ export const ChatView: React.FC<ChatViewProps> = ({
     setReplyingTo(null);
   };
 
-  const handleCall = (type: 'audio' | 'video') => {
+  const handleCall = async (type: 'audio' | 'video') => {
     const targetId = activeChatUser ? activeChatUser.id : activeGroup!.id;
     const isGroup = !!activeGroup;
-    onStartCall(type, targetId, isGroup);
-    setShowCallOverlay({
-      id: 'call_' + Date.now(),
-      type,
-      status: 'active',
-      startedBy: currentUser.id,
-      groupId: isGroup ? targetId : undefined
-    });
+
+    if (isGroup) {
+      // Group calls - just update database (WebRTC for groups is more complex)
+      onStartCall(type, targetId, isGroup);
+      setShowCallOverlay({
+        id: 'call_' + Date.now(),
+        type,
+        status: 'active',
+        startedBy: currentUser.id,
+        groupId: targetId
+      });
+      return;
+    }
+
+    // Direct calls - use WebRTC
+    try {
+      const callId = 'call_' + Date.now();
+      webrtcRef.current = new WebRTCService();
+      
+      // Set up remote stream handler
+      webrtcRef.current.setOnRemoteStream((stream) => {
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = stream;
+        }
+      });
+
+      // Set up call ended handler
+      webrtcRef.current.setOnCallEnded(() => {
+        endCall();
+      });
+
+      // Set up ICE candidate handler
+      webrtcRef.current.setOnIceCandidate((candidate) => {
+        sendSignal('ice-candidate', targetId, { candidate }, callId);
+      });
+      
+      // Start local stream
+      const localStream = await webrtcRef.current.startCall(type === 'video');
+      setIsCallActive(true);
+      setIsMuted(false);
+      setIsVideoOff(type === 'audio');
+
+      // Update local video element
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = localStream;
+      }
+
+      // Set up call overlay
+      setShowCallOverlay({
+        id: callId,
+        type,
+        status: 'active',
+        startedBy: currentUser.id
+      });
+
+      // Send call request
+      sendSignal('call-request', targetId, { type }, callId);
+
+      // Create and send offer
+      const offer = await webrtcRef.current.createOffer();
+      sendSignal('offer', targetId, { offer }, callId);
+
+      // Notify via database
+      onStartCall(type, targetId, false);
+    } catch (error: any) {
+      console.error('Failed to start call:', error);
+      alert(error.message || 'Failed to start call. Please check camera/microphone permissions.');
+      if (webrtcRef.current) {
+        webrtcRef.current.endCall();
+        webrtcRef.current = null;
+      }
+    }
+  };
+
+  const answerCall = async () => {
+    if (!incomingCall) return;
+
+    try {
+      const callType = incomingCall.type;
+      webrtcRef.current = new WebRTCService();
+      
+      // Set up remote stream handler
+      webrtcRef.current.setOnRemoteStream((stream) => {
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = stream;
+        }
+      });
+
+      // Set up call ended handler
+      webrtcRef.current.setOnCallEnded(() => {
+        endCall();
+      });
+
+      // Set up ICE candidate handler
+      webrtcRef.current.setOnIceCandidate((candidate) => {
+        sendSignal('ice-candidate', incomingCall.from, { candidate }, incomingCall.callId);
+      });
+      
+      // Start local stream
+      const localStream = await webrtcRef.current.startCall(callType === 'video');
+      setIsCallActive(true);
+      setIsMuted(false);
+      setIsVideoOff(callType === 'audio');
+
+      // Update local video element
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = localStream;
+      }
+
+      // Set up call overlay
+      setShowCallOverlay({
+        id: incomingCall.callId,
+        type: callType,
+        status: 'active',
+        startedBy: incomingCall.from
+      });
+
+      // Accept call
+      sendSignal('call-accepted', incomingCall.from, { type: callType }, incomingCall.callId);
+      setIncomingCall(null);
+
+      // Wait for offer from caller
+      // The offer will be handled in handleCallSignal
+    } catch (error: any) {
+      console.error('Failed to answer call:', error);
+      alert(error.message || 'Failed to answer call. Please check camera/microphone permissions.');
+      rejectCall();
+    }
+  };
+
+  const rejectCall = () => {
+    if (incomingCall) {
+      sendSignal('call-rejected', incomingCall.from, {}, incomingCall.callId);
+      setIncomingCall(null);
+    }
+  };
+
+  const endCall = () => {
+    if (webrtcRef.current) {
+      webrtcRef.current.endCall();
+      webrtcRef.current = null;
+    }
+    
+    if (showCallOverlay) {
+      const targetId = showCallOverlay.groupId || activeChatUser?.id;
+      if (targetId) {
+        sendSignal('call-ended', targetId, {}, showCallOverlay.id);
+      }
+      onEndCall(showCallOverlay.id);
+    }
+
+    setShowCallOverlay(null);
+    setIsCallActive(false);
+    setIsMuted(false);
+    setIsVideoOff(false);
+  };
+
+  const toggleMute = () => {
+    if (webrtcRef.current) {
+      const isEnabled = webrtcRef.current.toggleMute();
+      setIsMuted(!isEnabled);
+    }
+  };
+
+  const toggleVideo = () => {
+    if (webrtcRef.current) {
+      const isEnabled = webrtcRef.current.toggleVideo();
+      setIsVideoOff(!isEnabled);
+    }
   };
 
   const userMap = useMemo(() => {
@@ -265,27 +559,78 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     {userMap[msg.senderId] || 'User'}
                   </span>
                 )}
-                <div className={`relative max-w-[85%] p-3 rounded-2xl text-xs font-medium shadow-sm transition-all group-hover:pr-14 ${
-                  isMe 
-                    ? 'bg-orange-600 text-white rounded-tr-none' 
-                    : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none'
+                <div className={`relative max-w-[85%] rounded-2xl text-xs font-medium shadow-sm transition-all group-hover:pr-14 ${
+                  msg.attachment && (msg.attachment.type.startsWith('image/') || msg.attachment.type.startsWith('video/'))
+                    ? (isMe ? 'bg-transparent p-0' : 'bg-transparent p-0')
+                    : (isMe 
+                        ? 'bg-orange-600 text-white rounded-tr-none p-3' 
+                        : 'bg-white text-slate-700 border border-slate-100 rounded-tl-none p-3')
                 }`}>
-                  {repliedMessage && (
+                  {repliedMessage && !msg.attachment && (
                     <div className={`mb-2 p-2 rounded-lg border-l-4 text-[10px] ${isMe ? 'bg-black/10 border-white/40' : 'bg-slate-50 border-orange-500'} italic truncate`}>
                       <span className="font-bold block not-italic mb-1 opacity-70">Replying to {userMap[repliedMessage.senderId] || 'User'}</span>
                       {repliedMessage.text}
                     </div>
                   )}
 
-                  {msg.text && <p className="leading-relaxed whitespace-pre-wrap">{renderTextWithMentions(msg.text)}</p>}
-                  
                   {msg.attachment && (
-                    <div className={`mt-2 p-2 rounded-xl flex items-center gap-3 ${isMe ? 'bg-white/10' : 'bg-slate-50 border border-slate-100'}`}>
-                      {msg.attachment.type.startsWith('image/') ? <ImageIcon size={14} /> : <FileText size={14} />}
-                      <span className="text-[10px] font-bold truncate max-w-[120px]">{msg.attachment.name}</span>
-                      <a href={msg.attachment.data} download={msg.attachment.name} className="ml-auto">
-                        <ExternalLink size={12} className={isMe ? 'text-white' : 'text-orange-600'} />
-                      </a>
+                    <div className="mb-1">
+                      {msg.attachment.type.startsWith('image/') ? (
+                        <div className="rounded-xl overflow-hidden max-w-[250px] shadow-md">
+                          <img 
+                            src={msg.attachment.data} 
+                            alt={msg.attachment.name}
+                            className="w-full h-auto object-cover cursor-pointer"
+                            onClick={() => window.open(msg.attachment!.data, '_blank')}
+                          />
+                        </div>
+                      ) : msg.attachment.type.startsWith('video/') ? (
+                        <div className="rounded-xl overflow-hidden max-w-[250px] shadow-md">
+                          <video 
+                            src={msg.attachment.data} 
+                            controls
+                            className="w-full h-auto"
+                            style={{ maxHeight: '300px' }}
+                          >
+                            Your browser does not support the video tag.
+                          </video>
+                        </div>
+                      ) : (
+                        <div className={`p-3 rounded-xl flex items-center gap-3 max-w-[250px] ${isMe ? 'bg-white/10' : 'bg-slate-50 border border-slate-100'}`}>
+                          <div className={`w-12 h-12 rounded-lg flex items-center justify-center shrink-0 ${isMe ? 'bg-white/20' : 'bg-orange-100'}`}>
+                            {msg.attachment.type === 'application/pdf' ? (
+                              <FileText size={20} className={isMe ? 'text-white' : 'text-orange-600'} />
+                            ) : (
+                              <FileText size={20} className={isMe ? 'text-white' : 'text-slate-600'} />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[10px] font-bold text-slate-800 truncate">{msg.attachment.name}</p>
+                            <p className="text-[8px] text-slate-400 font-medium">
+                              {msg.attachment.type === 'application/pdf' ? 'PDF Document' : 
+                               msg.attachment.type.includes('word') ? 'Word Document' :
+                               msg.attachment.type.includes('excel') || msg.attachment.type.includes('spreadsheet') ? 'Spreadsheet' :
+                               'Document'}
+                            </p>
+                          </div>
+                          <a 
+                            href={msg.attachment.data} 
+                            download={msg.attachment.name} 
+                            className={`p-2 rounded-lg transition-all ${isMe ? 'bg-white/20 hover:bg-white/30 text-white' : 'bg-orange-600 hover:bg-orange-700 text-white'}`}
+                            title="Download"
+                          >
+                            <ExternalLink size={14} />
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  {msg.text && (
+                    <div className={msg.attachment && (msg.attachment.type.startsWith('image/') || msg.attachment.type.startsWith('video/')) 
+                      ? `mt-2 p-2 rounded-lg ${isMe ? 'bg-orange-600 text-white' : 'bg-white text-slate-700 border border-slate-100'}` 
+                      : ''}>
+                      <p className="leading-relaxed whitespace-pre-wrap">{renderTextWithMentions(msg.text)}</p>
                     </div>
                   )}
 
@@ -302,15 +647,17 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     >
                       <Reply size={14} />
                     </button>
-                    {isMe && (
-                      <button 
-                        onClick={() => onDeleteMessage(msg.id)}
-                        className="p-1.5 text-rose-300 hover:text-rose-500 transition-colors"
-                        title="Delete"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
+                    <button 
+                      onClick={() => {
+                        if (window.confirm('Are you sure you want to delete this message?')) {
+                          onDeleteMessage(msg.id);
+                        }
+                      }}
+                      className={`p-1.5 transition-colors ${isMe ? 'text-rose-300 hover:text-rose-500' : 'text-slate-400 hover:text-rose-500'}`}
+                      title="Delete"
+                    >
+                      <Trash2 size={14} />
+                    </button>
                   </div>
                 </div>
               </div>
@@ -333,14 +680,63 @@ export const ChatView: React.FC<ChatViewProps> = ({
         )}
 
         {attachment && (
-          <div className="p-3 bg-white border border-slate-100 rounded-t-2xl flex items-center justify-between mb-1">
-            <div className="flex items-center gap-2 truncate">
-              {attachment.type.startsWith('image/') ? <ImageIcon size={16} className="text-orange-600" /> : <FileText size={16} className="text-orange-600" />}
-              <span className="text-xs font-bold text-slate-700 truncate">{attachment.name}</span>
-            </div>
-            <button onClick={() => setAttachment(null)} className="text-slate-400 hover:text-rose-500">
-              <X size={16} />
-            </button>
+          <div className="mb-1">
+            {attachment.type.startsWith('image/') ? (
+              <div className="relative bg-white border border-slate-100 rounded-t-2xl p-2">
+                <img 
+                  src={attachment.data} 
+                  alt={attachment.name}
+                  className="w-full max-w-[200px] h-auto rounded-lg object-cover"
+                />
+                <button 
+                  onClick={() => setAttachment(null)} 
+                  className="absolute top-2 right-2 bg-black/50 hover:bg-black/70 text-white rounded-full p-1 transition-all"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ) : attachment.type.startsWith('video/') ? (
+              <div className="relative bg-white border border-slate-100 rounded-t-2xl p-2">
+                <video 
+                  src={attachment.data} 
+                  className="w-full max-w-[200px] h-auto rounded-lg"
+                  controls
+                >
+                  Your browser does not support the video tag.
+                </video>
+                <button 
+                  onClick={() => setAttachment(null)} 
+                  className="absolute top-2 right-2 bg-black/50 hover:bg-black/70 text-white rounded-full p-1 transition-all"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ) : (
+              <div className="p-3 bg-white border border-slate-100 rounded-t-2xl flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-orange-100 flex items-center justify-center shrink-0">
+                  {attachment.type === 'application/pdf' ? (
+                    <FileText size={18} className="text-orange-600" />
+                  ) : (
+                    <FileText size={18} className="text-slate-600" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-bold text-slate-700 truncate">{attachment.name}</p>
+                  <p className="text-[10px] text-slate-400 font-medium">
+                    {attachment.type === 'application/pdf' ? 'PDF Document' : 
+                     attachment.type.includes('word') ? 'Word Document' :
+                     attachment.type.includes('excel') || attachment.type.includes('spreadsheet') ? 'Spreadsheet' :
+                     'Document'}
+                  </p>
+                </div>
+                <button 
+                  onClick={() => setAttachment(null)} 
+                  className="text-slate-400 hover:text-rose-500 shrink-0"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            )}
           </div>
         )}
 

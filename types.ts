@@ -172,7 +172,7 @@ export interface Notification {
   userId: string;
   title: string;
   message: string;
-  type: 'task' | 'complaint' | 'update' | 'call' | 'message' | 'post';
+  type: 'task' | 'complaint' | 'update' | 'call' | 'message' | 'post' | 'group' | 'note' | 'email' | 'like' | 'comment';
   read: boolean;
   createdAt: string;
   linkTo?: ViewType;

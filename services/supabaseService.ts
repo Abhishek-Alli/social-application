@@ -238,14 +238,25 @@ export const postService = {
   },
 
   async create(post: Omit<Post, 'id' | 'createdAt'>): Promise<Post> {
+    // Generate a unique ID for the post
+    const postId = Date.now().toString() + Math.random().toString(36).substring(2, 11);
+    
     const { data, error } = await supabase
       .from('posts')
       .insert({
-        ...post,
+        id: postId,
         project_id: post.projectId,
         user_id: post.userId,
         user_name: post.userName,
         user_username: post.userUsername,
+        text: post.text,
+        image: post.image || null,
+        video: post.video || null,
+        ratio: post.ratio || '1:1',
+        likes: post.likes || [],
+        mentions: post.mentions || [],
+        hashtags: post.hashtags || [],
+        comments: post.comments || [],
         created_at: new Date().toISOString()
       })
       .select()
@@ -349,19 +360,34 @@ export const notificationService = {
   },
 
   async create(notification: Omit<Notification, 'id' | 'createdAt'>): Promise<Notification> {
+    const notificationId = Date.now().toString() + Math.random().toString(36).substring(2, 11);
     const { data, error } = await supabase
       .from('notifications')
       .insert({
-        ...notification,
+        id: notificationId,
         project_id: notification.projectId,
         user_id: notification.userId,
-        link_to: notification.linkTo,
+        title: notification.title,
+        message: notification.message,
+        type: notification.type,
+        read: notification.read || false,
+        link_to: notification.linkTo || null,
         created_at: new Date().toISOString()
       })
       .select()
       .single();
     if (error) throw error;
-    return data;
+    return {
+      id: data.id,
+      projectId: data.project_id || data.projectId,
+      userId: data.user_id || data.userId,
+      title: data.title,
+      message: data.message,
+      type: data.type,
+      read: data.read,
+      createdAt: data.created_at || data.createdAt,
+      linkTo: data.link_to || data.linkTo
+    };
   },
 
   async update(id: string, updates: Partial<Notification>): Promise<Notification> {
@@ -402,16 +428,23 @@ export const messageService = {
   },
 
   async create(message: Omit<Message, 'id' | 'createdAt'>): Promise<Message> {
+    // Generate a unique ID for the message
+    const messageId = Date.now().toString() + Math.random().toString(36).substring(2, 11);
+    
     const { data, error } = await supabase
       .from('messages')
       .insert({
-        ...message,
+        id: messageId,
         project_id: message.projectId,
         sender_id: message.senderId,
-        receiver_id: message.receiverId,
-        group_id: message.groupId,
-        reply_to_id: message.replyToId,
-        call_info: message.callInfo,
+        receiver_id: message.receiverId || null,
+        group_id: message.groupId || null,
+        text: message.text,
+        attachment: message.attachment || null,
+        call_info: message.callInfo || null,
+        status: message.status || 'sent',
+        reply_to_id: message.replyToId || null,
+        mentions: message.mentions || [],
         created_at: new Date().toISOString()
       })
       .select()
@@ -440,11 +473,16 @@ export const messageService = {
   },
 
   async delete(id: string): Promise<void> {
+    console.log('Deleting message from database, id:', id);
     const { error } = await supabase
       .from('messages')
       .delete()
       .eq('id', id);
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase delete error:', error);
+      throw error;
+    }
+    console.log('Message deleted successfully from database');
   }
 };
 
@@ -461,13 +499,19 @@ export const groupService = {
   },
 
   async create(group: Omit<Group, 'id' | 'createdAt'>): Promise<Group> {
+    // Generate a unique ID for the group
+    const groupId = 'g' + Date.now().toString() + Math.random().toString(36).substring(2, 11);
+    
     const { data, error } = await supabase
       .from('groups')
       .insert({
-        ...group,
+        id: groupId,
         project_id: group.projectId,
+        name: group.name,
+        description: group.description || null,
         created_by: group.createdBy,
-        active_call: group.activeCall,
+        members: group.members || [],
+        active_call: group.activeCall || null,
         created_at: new Date().toISOString()
       })
       .select()
