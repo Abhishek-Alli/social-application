@@ -5,7 +5,7 @@ import {
   LogIn, ShieldCheck, UserCircle, LogOut, AtSign, Save, 
   UserPlus, Users, ChevronRight, X, Camera, Briefcase, 
   Key, Phone, Mail, Calendar, Hash, Send, Lock, Shield, 
-  QrCode, Info, Fingerprint, ShieldAlert, CheckCircle2
+  QrCode, Info, Fingerprint, ShieldAlert, CheckCircle2, Edit2, Download
 } from 'lucide-react';
 
 interface AuthViewProps {
@@ -36,6 +36,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
   const [isNew, setIsNew] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editUsername, setEditUsername] = useState('');
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
   
   const [isAddingSub, setIsAddingSub] = useState(false);
   const [form, setForm] = useState({
@@ -43,17 +44,214 @@ export const AuthView: React.FC<AuthViewProps> = ({
     designation: '', employeeId: '', contactNo: '', password: '',
     telegramUserId: '', telegramToken: '', profilePhoto: ''
   });
+  
+  const [editForm, setEditForm] = useState({
+    name: '', email: '', department: '', subDepartment: '',
+    designation: '', employeeId: '', contactNo: '', dob: '',
+    profilePhoto: ''
+  });
 
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const identityCardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (currentUser) setEditUsername(currentUser.username || '');
+    if (currentUser) {
+      setEditUsername(currentUser.username || '');
+      setEditForm({
+        name: currentUser.name || '',
+        email: currentUser.email || '',
+        department: currentUser.department || '',
+        subDepartment: currentUser.subDepartment || '',
+        designation: currentUser.designation || '',
+        employeeId: currentUser.employeeId || '',
+        contactNo: currentUser.contactNo || '',
+        dob: currentUser.dob || '',
+        profilePhoto: currentUser.profilePhoto || ''
+      });
+    }
   }, [currentUser]);
 
   const handleUpdate = () => {
     if (onUpdateProfile && editUsername) {
       onUpdateProfile({ username: editUsername.replace('@', '').toLowerCase() });
       setIsEditing(false);
+    }
+  };
+
+  const handleEditProfile = () => {
+    setIsEditingProfile(true);
+  };
+
+  const handleSaveProfile = () => {
+    if (onUpdateProfile) {
+      onUpdateProfile({
+        name: editForm.name,
+        email: editForm.email,
+        department: editForm.department,
+        subDepartment: editForm.subDepartment,
+        designation: editForm.designation,
+        employeeId: editForm.employeeId,
+        contactNo: editForm.contactNo,
+        dob: editForm.dob,
+        profilePhoto: editForm.profilePhoto
+      });
+      setIsEditingProfile(false);
+      alert("Profile updated successfully!");
+    }
+  };
+
+  const handleCancelEdit = () => {
+    if (currentUser) {
+      setEditForm({
+        name: currentUser.name || '',
+        email: currentUser.email || '',
+        department: currentUser.department || '',
+        subDepartment: currentUser.subDepartment || '',
+        designation: currentUser.designation || '',
+        employeeId: currentUser.employeeId || '',
+        contactNo: currentUser.contactNo || '',
+        dob: currentUser.dob || '',
+        profilePhoto: currentUser.profilePhoto || ''
+      });
+    }
+    setIsEditingProfile(false);
+  };
+
+  const handleEditPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => setEditForm(prev => ({ ...prev, profilePhoto: reader.result as string }));
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleDownloadPDF = async () => {
+    if (!identityCardRef.current || !currentUser) return;
+    
+    try {
+      // Dynamic import to avoid SSR issues
+      const html2canvas = (await import('html2canvas')).default;
+      const jsPDF = (await import('jspdf')).jsPDF;
+      
+      const cardElement = identityCardRef.current;
+      
+      // Temporarily hide edit buttons and other UI elements that shouldn't be in PDF
+      const originalDisplay: { [key: string]: string } = {};
+      const buttonsToHide = cardElement.parentElement?.querySelectorAll('button');
+      buttonsToHide?.forEach((btn, index) => {
+        const key = `btn_${index}`;
+        originalDisplay[key] = btn.style.display;
+        btn.style.display = 'none';
+      });
+      
+      // Capture the card as canvas with exact styling including borders and shadows
+      const canvas = await html2canvas(cardElement, {
+        scale: 4, // Very high scale for crisp quality
+        backgroundColor: '#ffffff',
+        useCORS: true,
+        logging: false,
+        allowTaint: true,
+        removeContainer: false,
+        imageTimeout: 0,
+        width: cardElement.offsetWidth + 8, // Add extra space for border
+        height: cardElement.offsetHeight + 8, // Add extra space for border
+        x: -4, // Offset to include left border
+        y: -4, // Offset to include top border
+        // Preserve all styles including borders, shadows, rounded corners
+        onclone: (clonedDoc) => {
+          // Find the cloned card element
+          const clonedCard = clonedDoc.querySelector('[class*="aspect-[3/4]"]') as HTMLElement;
+          if (clonedCard) {
+            const computedStyle = getComputedStyle(cardElement);
+            // Ensure all visual styles are preserved exactly as displayed
+            clonedCard.style.transform = 'none';
+            clonedCard.style.position = 'relative';
+            clonedCard.style.boxShadow = computedStyle.boxShadow || '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(249, 115, 22, 0.1)';
+            clonedCard.style.border = computedStyle.border || '4px solid rgb(234, 88, 12)'; // Orange-600 border
+            clonedCard.style.borderRadius = computedStyle.borderRadius || '2rem'; // Round corners (32px)
+            clonedCard.style.overflow = 'visible'; // Show full borders
+            clonedCard.style.backgroundColor = computedStyle.backgroundColor || '#ffffff';
+            clonedCard.style.boxSizing = 'border-box'; // Include border in dimensions
+            // Ensure orange border with round corners is visible
+            if (!computedStyle.border || computedStyle.border === 'none' || computedStyle.border.includes('white')) {
+              clonedCard.style.border = '4px solid rgb(234, 88, 12)'; // Orange-600
+            }
+            // Ensure round corners are preserved
+            if (!computedStyle.borderRadius || computedStyle.borderRadius === '0px') {
+              clonedCard.style.borderRadius = '2rem'; // 32px rounded corners
+            }
+            // Ensure shadow is visible
+            if (!computedStyle.boxShadow || computedStyle.boxShadow === 'none') {
+              clonedCard.style.boxShadow = '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(249, 115, 22, 0.1)';
+            }
+            
+            // Also update profile photo border to orange with round corners
+            const profilePhoto = clonedCard.querySelector('[class*="rounded-full"]') as HTMLElement;
+            if (profilePhoto) {
+              const originalPhoto = cardElement.querySelector('[class*="rounded-full"]') as HTMLElement;
+              if (originalPhoto) {
+                const photoStyle = getComputedStyle(originalPhoto);
+                profilePhoto.style.border = photoStyle.border || '4px solid rgb(234, 88, 12)'; // Orange border
+                profilePhoto.style.borderRadius = photoStyle.borderRadius || '9999px'; // Fully rounded
+                // Force orange border if white
+                if (!photoStyle.border || photoStyle.border.includes('white')) {
+                  profilePhoto.style.border = '4px solid rgb(234, 88, 12)'; // Orange-600
+                }
+                // Ensure round corners
+                if (!photoStyle.borderRadius || photoStyle.borderRadius === '0px') {
+                  profilePhoto.style.borderRadius = '9999px'; // Fully rounded
+                }
+              }
+            }
+          }
+        }
+      });
+      
+      // Restore button visibility
+      buttonsToHide?.forEach((btn, index) => {
+        const key = `btn_${index}`;
+        btn.style.display = originalDisplay[`btn_${index}`] || '';
+      });
+      
+      const imgData = canvas.toDataURL('image/png', 1.0);
+      
+      // Get actual card dimensions to maintain exact aspect ratio
+      const cardWidth = cardElement.offsetWidth;
+      const cardHeight = cardElement.offsetHeight;
+      const aspectRatio = cardHeight / cardWidth;
+      
+      // Calculate PDF dimensions maintaining exact 3:4 ratio
+      // Add padding to show border properly
+      const padding = 10; // mm padding around card
+      const pdfWidth = 210; // A4 width in mm (standard)
+      const cardPdfWidth = pdfWidth - (padding * 2);
+      const cardPdfHeight = cardPdfWidth * (4 / 3); // Maintain 3:4 portrait ratio
+      const pdfHeight = cardPdfHeight + (padding * 2);
+      
+      // Create PDF with exact dimensions
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: [pdfWidth, pdfHeight]
+      });
+      
+      // Set white background
+      pdf.setFillColor(255, 255, 255);
+      pdf.rect(0, 0, pdfWidth, pdfHeight, 'F');
+      
+      // Add image with padding to show border design properly
+      pdf.addImage(imgData, 'PNG', padding, padding, cardPdfWidth, cardPdfHeight, undefined, 'FAST');
+      
+      // Download PDF with proper filename
+      const sanitizedName = (currentUser.name || 'Identity').replace(/[^a-zA-Z0-9]/g, '_');
+      const fileName = `${sanitizedName}_Identity_Card_${new Date().getTime()}.pdf`;
+      pdf.save(fileName);
+      
+      alert("✅ Identity card downloaded successfully as PDF!");
+    } catch (error: any) {
+      console.error('PDF download error:', error);
+      alert("❌ Failed to download PDF. Please try again.");
     }
   };
 
@@ -132,87 +330,175 @@ export const AuthView: React.FC<AuthViewProps> = ({
   if (currentUser) {
     return (
       <div className="flex flex-col p-6 space-y-8 animate-in fade-in duration-500 pb-32 no-scrollbar">
-        {/* Digital Identity Card (3:4 Portrait Ratio) */}
-        <div className="relative mx-auto w-full max-w-[320px] aspect-[3/4] bg-white rounded-[2rem] shadow-2xl shadow-orange-900/10 border-4 border-white overflow-hidden flex flex-col group transition-all duration-500 hover:shadow-orange-600/20">
-          
-          <div className="h-24 bg-slate-950 relative overflow-hidden flex items-center justify-between px-6">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-orange-600 rounded-full -mr-16 -mt-16 opacity-20 blur-2xl" />
-            <div className="z-10">
-              <div className="flex items-center gap-1.5 mb-0.5">
-                <div className="bg-orange-600 p-1 rounded-md">
-                   <Shield className="text-white" size={14} fill="currentColor" />
-                </div>
-                <h2 className="text-white font-black italic tracking-tighter text-lg leading-none">SRJ</h2>
-              </div>
-              <p className="text-[7px] text-orange-500 font-black uppercase tracking-[0.2em] leading-none">World of Steel</p>
-            </div>
-            <div className="z-10 text-right">
-              <span className="block text-white text-[8px] font-black uppercase tracking-widest opacity-40">Official Identity</span>
-              <span className="block text-orange-600 text-[9px] font-black uppercase tracking-widest leading-none mt-0.5">Enterprise Node</span>
-            </div>
+        {/* Edit Profile and Download Buttons - Outside Card for Better Visibility */}
+        {!isEditingProfile && (
+          <div className="w-full max-w-[320px] mx-auto flex gap-2">
+            <button
+              onClick={handleEditProfile}
+              className="flex-1 px-4 py-3 bg-orange-600 text-white rounded-xl text-sm font-bold uppercase tracking-widest hover:bg-orange-700 transition-all flex items-center justify-center gap-2 shadow-lg active:scale-95"
+            >
+              <Edit2 size={16} />
+              Edit Profile
+            </button>
+            <button
+              onClick={handleDownloadPDF}
+              className="px-4 py-3 bg-slate-700 text-white rounded-xl text-sm font-bold uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-2 shadow-lg active:scale-95"
+            >
+              <Download size={16} />
+            </button>
           </div>
+        )}
 
-          <div className="flex-1 bg-gradient-to-b from-slate-50 to-white flex flex-col items-center pt-8 px-6 text-center">
-            <div className="relative mb-4">
-              <div className="w-28 h-28 rounded-full border-[5px] border-white shadow-xl overflow-hidden bg-slate-100 flex items-center justify-center">
-                {currentUser.profilePhoto ? (
-                  <img src={currentUser.profilePhoto} className="w-full h-full object-cover" alt="Identity" />
-                ) : (
-                  <UserCircle size={64} className="text-slate-300" />
+        {/* Digital Identity Card (3:4 Portrait Ratio) */}
+        <div ref={identityCardRef} className="relative mx-auto w-full max-w-[320px] aspect-[3/4] bg-white rounded-[2rem] shadow-2xl shadow-orange-900/10 border-4 border-orange-600 overflow-visible flex flex-col group transition-all duration-500 hover:shadow-orange-600/20">
+          
+          <div className="flex-1 bg-gradient-to-b from-slate-50 to-white flex flex-col items-center pt-4 px-5 pb-5 text-center justify-between overflow-hidden rounded-[2rem]">
+            <div className="flex flex-col items-center flex-shrink-0 w-full">
+              <div className="relative mb-4 mt-2 flex-shrink-0">
+                <div className="w-24 h-24 rounded-full border-[4px] border-orange-600 shadow-xl overflow-hidden bg-slate-100 flex items-center justify-center">
+                  {(isEditingProfile ? editForm.profilePhoto : currentUser.profilePhoto) ? (
+                    <img src={isEditingProfile ? editForm.profilePhoto : currentUser.profilePhoto} className="w-full h-full object-cover" alt="Identity" />
+                  ) : (
+                    <UserCircle size={56} className="text-slate-300" />
+                  )}
+                </div>
+                {isEditingProfile && (
+                  <button
+                    onClick={() => photoInputRef.current?.click()}
+                    className="absolute bottom-0 right-0 w-7 h-7 bg-orange-600 text-white rounded-full flex items-center justify-center shadow-lg hover:bg-orange-700 transition-all z-10"
+                  >
+                    <Camera size={12} />
+                  </button>
                 )}
+                {!isEditingProfile && (
+                  <div className={`absolute bottom-0 right-0 w-5 h-5 border-3 border-white rounded-full flex items-center justify-center ${currentUser.isEmailVerified ? 'bg-emerald-500' : 'bg-amber-500'}`}>
+                    <Check className="text-white" size={8} />
+                  </div>
+                )}
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleEditPhotoUpload}
+                  className="hidden"
+                />
               </div>
-              <div className={`absolute bottom-1 right-1 w-6 h-6 border-4 border-white rounded-full flex items-center justify-center ${currentUser.isEmailVerified ? 'bg-emerald-500' : 'bg-amber-500'}`}>
-                 <Check className="text-white" size={10} />
+
+              <h3 className="text-base font-black text-slate-900 tracking-tight mb-5 flex-shrink-0 break-words px-2 line-clamp-1">
+                {currentUser.name ? currentUser.name.charAt(0).toLowerCase() : 'U'}
+              </h3>
+              <div className="bg-orange-600/10 px-3 py-1 rounded-full inline-flex items-center justify-center mb-6 flex-shrink-0">
+                 <span className="text-xs font-black text-orange-600 uppercase tracking-widest">
+                   {currentUser.designation ? currentUser.designation.charAt(0).toUpperCase() : 'S'}
+                 </span>
               </div>
             </div>
 
-            <h3 className="text-xl font-black text-slate-900 tracking-tight mb-1">{currentUser.name}</h3>
-            <div className="bg-orange-600/10 px-3 py-1 rounded-full inline-block mb-6">
-               <span className="text-[9px] font-black text-orange-600 uppercase tracking-widest">{currentUser.designation || 'Specialist'}</span>
-            </div>
-
-            <div className="w-full grid grid-cols-2 gap-y-4 gap-x-6 text-left border-t border-slate-100 pt-6">
-              <div className="space-y-0.5">
-                <span className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">Employee ID</span>
-                <span className="block text-[10px] font-bold text-slate-800 uppercase tracking-tight">{currentUser.employeeId || 'SRJ-NODE'}</span>
+            <div className="w-full grid grid-cols-2 gap-y-2.5 gap-x-3 text-left border-t border-slate-100 pt-5 pb-2 flex-shrink-0 mt-1">
+              <div className="space-y-0.5 min-h-[35px]">
+                <span className="block text-[7px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Employee ID</span>
+                <span className="block text-[9px] font-bold text-slate-800 uppercase tracking-tight break-all leading-tight">{currentUser.employeeId || 'SRJ-NODE'}</span>
               </div>
-              <div className="space-y-0.5">
-                <span className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">Department</span>
-                <span className="block text-[10px] font-bold text-slate-800 uppercase tracking-tight truncate">{currentUser.department || 'Operations'}</span>
+              <div className="space-y-0.5 min-h-[35px]">
+                <span className="block text-[7px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Department</span>
+                <span className="block text-[9px] font-bold text-slate-800 uppercase tracking-tight break-all leading-tight">{currentUser.department || 'Operations'}</span>
               </div>
-              <div className="space-y-0.5">
-                <span className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">Verification</span>
-                <span className={`block text-[10px] font-bold uppercase tracking-tight ${currentUser.isEmailVerified ? 'text-emerald-600' : 'text-amber-600'}`}>
+              <div className="space-y-0.5 min-h-[35px]">
+                <span className="block text-[7px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Verification</span>
+                <span className={`block text-[9px] font-bold uppercase tracking-tight break-words leading-tight ${currentUser.isEmailVerified ? 'text-emerald-600' : 'text-amber-600'}`}>
                   {currentUser.isEmailVerified ? 'Verified' : 'Pending'}
                 </span>
               </div>
-              <div className="space-y-0.5">
-                <span className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">Username</span>
-                <span className="block text-[10px] font-bold text-orange-600 uppercase tracking-tight">@{currentUser.username}</span>
+              <div className="space-y-0.5 min-h-[35px]">
+                <span className="block text-[7px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Username</span>
+                <span className="block text-[9px] font-bold text-orange-600 uppercase tracking-tight break-all leading-tight">@{currentUser.username}</span>
               </div>
-              <div className="col-span-2 space-y-0.5">
-                <span className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">Work Email</span>
-                <span className="block text-[10px] font-bold text-slate-800 truncate">{currentUser.email}</span>
+              <div className="col-span-2 space-y-0.5 min-h-[35px]">
+                <span className="block text-[7px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Work Email</span>
+                <span className="block text-[9px] font-bold text-slate-800 break-all leading-tight">{currentUser.email}</span>
               </div>
             </div>
 
-            <div className="mt-auto w-full flex items-center justify-between pb-6 opacity-60 grayscale hover:grayscale-0 transition-all cursor-default">
-              <div className="flex items-center gap-2">
-                 <QrCode size={32} className="text-slate-900" />
-                 <div className="text-left">
-                   <span className="block text-[6px] font-bold text-slate-400 uppercase">System Validation</span>
-                   <span className="block text-[7px] font-black text-slate-900 uppercase">SECURE-NODE-01</span>
-                 </div>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className={`w-1.5 h-1.5 rounded-full animate-pulse ${currentUser.isTwoStepEnabled ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                <span className={`text-[8px] font-black uppercase tracking-widest ${currentUser.isTwoStepEnabled ? 'text-emerald-600' : 'text-slate-400'}`}>
-                  {currentUser.isTwoStepEnabled ? '2FA Enabled' : '2FA Disabled'}
-                </span>
-              </div>
-            </div>
           </div>
         </div>
+
+        {/* Edit Form - Outside Card for Better Visibility */}
+        {isEditingProfile && (
+          <div className="w-full max-w-[320px] mx-auto bg-white rounded-2xl p-4 shadow-lg border border-slate-200 space-y-3">
+            <h3 className="text-sm font-bold text-slate-900 mb-3 uppercase tracking-widest">Edit Profile Details</h3>
+            <input
+              type="text"
+              value={editForm.name}
+              onChange={(e) => setEditForm(prev => ({ ...prev, name: e.target.value }))}
+              placeholder="Full Name"
+              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+            />
+            <input
+              type="email"
+              value={editForm.email}
+              onChange={(e) => setEditForm(prev => ({ ...prev, email: e.target.value }))}
+              placeholder="Email"
+              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+            />
+            <input
+              type="text"
+              value={editForm.employeeId}
+              onChange={(e) => setEditForm(prev => ({ ...prev, employeeId: e.target.value }))}
+              placeholder="Employee ID"
+              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+            />
+            <input
+              type="text"
+              value={editForm.department}
+              onChange={(e) => setEditForm(prev => ({ ...prev, department: e.target.value }))}
+              placeholder="Department"
+              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+            />
+            <input
+              type="text"
+              value={editForm.subDepartment}
+              onChange={(e) => setEditForm(prev => ({ ...prev, subDepartment: e.target.value }))}
+              placeholder="Sub Department"
+              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+            />
+            <input
+              type="text"
+              value={editForm.designation}
+              onChange={(e) => setEditForm(prev => ({ ...prev, designation: e.target.value }))}
+              placeholder="Designation"
+              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+            />
+            <input
+              type="text"
+              value={editForm.contactNo}
+              onChange={(e) => setEditForm(prev => ({ ...prev, contactNo: e.target.value }))}
+              placeholder="Contact Number"
+              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+            />
+            <input
+              type="date"
+              value={editForm.dob}
+              onChange={(e) => setEditForm(prev => ({ ...prev, dob: e.target.value }))}
+              placeholder="Date of Birth"
+              className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+            />
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={handleSaveProfile}
+                className="flex-1 px-4 py-2 bg-orange-600 text-white rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-orange-700 transition-all flex items-center justify-center gap-2"
+              >
+                <Save size={14} />
+                Save
+              </button>
+              <button
+                onClick={handleCancelEdit}
+                className="flex-1 px-4 py-2 bg-slate-200 text-slate-700 rounded-xl text-xs font-bold uppercase tracking-widest hover:bg-slate-300 transition-all"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Security Settings Section */}
         <div className="px-2 space-y-4">

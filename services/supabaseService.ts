@@ -22,7 +22,29 @@ export const userService = {
       .from('users')
       .select('*');
     if (error) throw error;
-    return data || [];
+    
+    // Map snake_case to camelCase
+    return (data || []).map((u: any) => ({
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      username: u.username,
+      role: u.role,
+      parentId: u.parent_id,
+      projectId: u.project_id,
+      employeeId: u.employee_id,
+      department: u.department,
+      subDepartment: u.sub_department,
+      designation: u.designation,
+      dob: u.dob,
+      contactNo: u.contact_no,
+      profilePhoto: u.profile_photo,
+      password: u.password,
+      isTwoStepEnabled: u.is_two_step_enabled,
+      isEmailVerified: u.is_email_verified,
+      telegramUserId: u.telegram_user_id,
+      telegramToken: u.telegram_token
+    }));
   },
 
   async getById(id: string): Promise<User | null> {
@@ -32,28 +54,149 @@ export const userService = {
       .eq('id', id)
       .single();
     if (error) return null;
-    return data;
+    if (!data) return null;
+    
+    // Map snake_case to camelCase
+    return {
+      id: data.id,
+      name: data.name,
+      email: data.email,
+      username: data.username,
+      role: data.role,
+      parentId: data.parent_id,
+      projectId: data.project_id,
+      employeeId: data.employee_id,
+      department: data.department,
+      subDepartment: data.sub_department,
+      designation: data.designation,
+      dob: data.dob,
+      contactNo: data.contact_no,
+      profilePhoto: data.profile_photo,
+      password: data.password,
+      isTwoStepEnabled: data.is_two_step_enabled,
+      isEmailVerified: data.is_email_verified,
+      telegramUserId: data.telegram_user_id,
+      telegramToken: data.telegram_token
+    };
   },
 
   async create(user: Omit<User, 'id'>): Promise<User> {
+    // Generate unique ID if not provided
+    const userId = `u${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Map camelCase to snake_case for Supabase
+    const insertData: any = {
+      id: userId, // Add generated ID
+      name: user.name,
+      email: user.email,
+      username: user.username,
+      role: user.role,
+      parent_id: user.parentId,
+      project_id: user.projectId,
+      employee_id: user.employeeId,
+      department: user.department,
+      sub_department: user.subDepartment,
+      designation: user.designation,
+      dob: user.dob,
+      contact_no: user.contactNo, // Map contactNo to contact_no
+      profile_photo: user.profilePhoto,
+      password: user.password,
+      is_two_step_enabled: user.isTwoStepEnabled !== undefined ? user.isTwoStepEnabled : false,
+      is_email_verified: user.isEmailVerified !== undefined ? user.isEmailVerified : false,
+      telegram_user_id: user.telegramUserId,
+      telegram_token: user.telegramToken
+    };
+    
+    // Remove undefined/null fields (but keep id, name, email, username, role, project_id as they are required)
+    Object.keys(insertData).forEach(key => {
+      if (insertData[key] === undefined || (insertData[key] === null && key !== 'parent_id' && key !== 'employee_id' && key !== 'department' && key !== 'sub_department' && key !== 'designation' && key !== 'dob' && key !== 'contact_no' && key !== 'profile_photo' && key !== 'password' && key !== 'telegram_user_id' && key !== 'telegram_token')) {
+        delete insertData[key];
+      }
+    });
+    
     const { data, error } = await supabase
       .from('users')
-      .insert(user)
+      .insert(insertData)
       .select()
       .single();
     if (error) throw error;
-    return data;
+    
+    // Map snake_case back to camelCase
+    return {
+      id: data.id,
+      name: data.name,
+      email: data.email,
+      username: data.username,
+      role: data.role,
+      parentId: data.parent_id,
+      projectId: data.project_id,
+      employeeId: data.employee_id,
+      department: data.department,
+      subDepartment: data.sub_department,
+      designation: data.designation,
+      dob: data.dob,
+      contactNo: data.contact_no,
+      profilePhoto: data.profile_photo,
+      password: data.password,
+      isTwoStepEnabled: data.is_two_step_enabled,
+      isEmailVerified: data.is_email_verified,
+      telegramUserId: data.telegram_user_id,
+      telegramToken: data.telegram_token
+    };
   },
 
   async update(id: string, updates: Partial<User>): Promise<User> {
+    // Map camelCase to snake_case for Supabase
+    const updateData: any = {};
+    if (updates.name !== undefined) updateData.name = updates.name;
+    if (updates.email !== undefined) updateData.email = updates.email;
+    if (updates.username !== undefined) updateData.username = updates.username;
+    if (updates.role !== undefined) updateData.role = updates.role;
+    if (updates.parentId !== undefined) updateData.parent_id = updates.parentId;
+    if (updates.projectId !== undefined) updateData.project_id = updates.projectId;
+    if (updates.employeeId !== undefined) updateData.employee_id = updates.employeeId;
+    if (updates.department !== undefined) updateData.department = updates.department;
+    if (updates.subDepartment !== undefined) updateData.sub_department = updates.subDepartment;
+    if (updates.designation !== undefined) updateData.designation = updates.designation;
+    if (updates.dob !== undefined) updateData.dob = updates.dob;
+    if (updates.contactNo !== undefined) updateData.contact_no = updates.contactNo;
+    if (updates.profilePhoto !== undefined) updateData.profile_photo = updates.profilePhoto;
+    if (updates.password !== undefined) updateData.password = updates.password;
+    if (updates.isTwoStepEnabled !== undefined) updateData.is_two_step_enabled = updates.isTwoStepEnabled;
+    if (updates.isEmailVerified !== undefined) updateData.is_email_verified = updates.isEmailVerified;
+    if (updates.telegramUserId !== undefined) updateData.telegram_user_id = updates.telegramUserId;
+    if (updates.telegramToken !== undefined) updateData.telegram_token = updates.telegramToken;
+    
     const { data, error } = await supabase
       .from('users')
-      .update(updates)
+      .update(updateData)
       .eq('id', id)
       .select()
       .single();
     if (error) throw error;
-    return data;
+    
+    // Map snake_case back to camelCase
+    return {
+      id: data.id,
+      name: data.name,
+      email: data.email,
+      username: data.username,
+      role: data.role,
+      parentId: data.parent_id,
+      projectId: data.project_id,
+      employeeId: data.employee_id,
+      department: data.department,
+      subDepartment: data.sub_department,
+      designation: data.designation,
+      dob: data.dob,
+      contactNo: data.contact_no,
+      profilePhoto: data.profile_photo,
+      password: data.password,
+      isTwoStepEnabled: data.is_two_step_enabled,
+      isEmailVerified: data.is_email_verified,
+      telegramUserId: data.telegram_user_id,
+      telegramToken: data.telegram_token
+    };
   },
 
   async delete(id: string): Promise<void> {
