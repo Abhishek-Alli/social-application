@@ -14,6 +14,7 @@ import {
   emailService,
   otpService
 } from './services/supabaseService';
+import { supabaseAuthService } from './services/supabaseAuthService';
 import { TaskCard } from './components/TaskCard';
 import { NoteCard } from './components/NoteCard';
 import { AddTaskModal } from './components/AddTaskModal';
@@ -90,6 +91,8 @@ const App: React.FC = () => {
   const [needsTwoStep, setNeedsTwoStep] = useState(false);
   const [pendingUser, setPendingUser] = useState<User | null>(null);
   const [pendingEmailVerification, setPendingEmailVerification] = useState<{ user: User; code: string } | null>(null);
+  const [pendingRegistration, setPendingRegistration] = useState<{ userData: Partial<User>; code: string } | null>(null);
+  const [pendingSubordinateRegistration, setPendingSubordinateRegistration] = useState<{ userData: Partial<User>; code: string } | null>(null);
 
   // Load ALL data from Supabase on mount (not localStorage)
   useEffect(() => {
@@ -501,7 +504,7 @@ const App: React.FC = () => {
   };
 
   const handleLogin = async (username: string, password?: string, code?: string) => {
-    if (!needsTwoStep && !pendingEmailVerification) {
+    if (!needsTwoStep && !pendingEmailVerification && !pendingRegistration && !pendingSubordinateRegistration) {
       // Remove @ symbol if user typed it and trim whitespace
       const cleanUsername = username.replace('@', '').trim().toLowerCase();
       const cleanPassword = password?.trim();
@@ -602,42 +605,146 @@ const App: React.FC = () => {
     }
   };
 
-  const handleVerifyEmail = async (code: string) => {
-    if (!pendingEmailVerification) return;
+  // Handle email link verification (called when user clicks link in email)
+  const handleEmailLinkVerification = async () => {
+    // Check if user clicked email verification link
+    const hashParams = new URLSearchParams(window.location.hash.substring(1));
+    const accessToken = hashParams.get('access_token');
+    const type = hashParams.get('type');
     
-    if (code === pendingEmailVerification.code) {
+    if (accessToken && type === 'signup') {
       try {
-        // Update user in Supabase
-        const updatedUser = await userService.update(pendingEmailVerification.user.id, { 
-          isEmailVerified: true 
-        });
+        // Get session from Supabase
+        const session = await supabaseAuthService.getSession();
         
-        // Update local state
-        setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
-        setPendingEmailVerification(null);
-        
-        alert("✅ Email verified successfully! You can now log in.");
+        if (session && session.user) {
+          // Check if this is for registration or subordinate
+          if (pendingRegistration && pendingRegistration.code === 'supabase-auth') {
+            // Email verified - create user in our custom users table
+            const newUser: Omit<User, 'id'> = {
+              name: pendingRegistration.userData.name || 'Unknown',
+              email: pendingRegistration.userData.email || '',
+              username: pendingRegistration.userData.username || 'user_' + Date.now(),
+              role: pendingRegistration.userData.role || Role.EMPLOYEE,
+              parentId: pendingRegistration.userData.parentId || 'u1',
+              projectId: pendingRegistration.userData.projectId || currentProjectId,
+              isEmailVerified: true,
+              isTwoStepEnabled: pendingRegistration.userData.isTwoStepEnabled || false,
+              password: pendingRegistration.userData.password,
+              employeeId: pendingRegistration.userData.employeeId,
+              department: pendingRegistration.userData.department,
+              subDepartment: pendingRegistration.userData.subDepartment,
+              designation: pendingRegistration.userData.designation,
+              dob: pendingRegistration.userData.dob,
+              contactNo: pendingRegistration.userData.contactNo,
+              profilePhoto: pendingRegistration.userData.profilePhoto,
+              telegramUserId: pendingRegistration.userData.telegramUserId,
+              telegramToken: pendingRegistration.userData.telegramToken
+            };
+            
+            const createdUser = await userService.create(newUser);
+            setUsers(prev => [...prev, createdUser]);
+            setPendingRegistration(null);
+            setPendingEmailVerification(null);
+            
+            // Clear URL hash
+            window.history.replaceState(null, '', window.location.pathname);
+            
+            alert(`✅ Email verified and account created successfully!\n\nWelcome ${createdUser.name}! You can now log in.`);
+          } else if (pendingSubordinateRegistration && pendingSubordinateRegistration.code === 'supabase-auth') {
+            // Email verified - create subordinate in our custom users table
+            const newUser: Omit<User, 'id'> = {
+              name: pendingSubordinateRegistration.userData.name || 'Unknown',
+              email: pendingSubordinateRegistration.userData.email || '',
+              username: pendingSubordinateRegistration.userData.username || 'user_' + Date.now(),
+              role: pendingSubordinateRegistration.userData.role || Role.EMPLOYEE,
+              parentId: pendingSubordinateRegistration.userData.parentId || currentUser?.id || 'u1',
+              projectId: pendingSubordinateRegistration.userData.projectId || currentProjectId,
+              isEmailVerified: true,
+              isTwoStepEnabled: pendingSubordinateRegistration.userData.isTwoStepEnabled || false,
+              password: pendingSubordinateRegistration.userData.password,
+              employeeId: pendingSubordinateRegistration.userData.employeeId,
+              department: pendingSubordinateRegistration.userData.department,
+              subDepartment: pendingSubordinateRegistration.userData.subDepartment,
+              designation: pendingSubordinateRegistration.userData.designation,
+              dob: pendingSubordinateRegistration.userData.dob,
+              contactNo: pendingSubordinateRegistration.userData.contactNo,
+              profilePhoto: pendingSubordinateRegistration.userData.profilePhoto,
+              telegramUserId: pendingSubordinateRegistration.userData.telegramUserId,
+              telegramToken: pendingSubordinateRegistration.userData.telegramToken
+            };
+            
+            const createdUser = await userService.create(newUser);
+            setUsers(prev => [...prev, createdUser]);
+            setPendingSubordinateRegistration(null);
+            setPendingEmailVerification(null);
+            
+            // Clear URL hash
+            window.history.replaceState(null, '', window.location.pathname);
+            
+            alert(`✅ Email verified and personnel account created successfully!\n\n${createdUser.name} Connected Successfully`);
+          }
+        }
       } catch (error: any) {
-        console.error('Email verification error:', error);
-        alert("❌ Failed to verify email: " + (error.message || "Please try again."));
+        console.error('Email link verification error:', error);
+        alert("❌ Failed to verify email link. Please try again.");
       }
-    } else {
-      alert("❌ Invalid verification code. Please try again.");
     }
   };
 
-  const handleResendVerificationCode = () => {
-    if (!pendingEmailVerification) return;
-    
-    // Generate new code
-    const newCode = Math.floor(100000 + Math.random() * 900000).toString();
-    setPendingEmailVerification({
-      ...pendingEmailVerification,
-      code: newCode
+  // Listen for email link verification on mount
+  useEffect(() => {
+    handleEmailLinkVerification();
+  }, []);
+
+  // Also listen to Supabase auth state changes
+  useEffect(() => {
+    const subscription = supabaseAuthService.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session) {
+        // User signed in via email link - handle verification
+        handleEmailLinkVerification();
+      }
     });
+
+    return () => {
+      if (subscription && subscription.data) {
+        subscription.data.subscription.unsubscribe();
+      }
+    };
+  }, [pendingRegistration, pendingSubordinateRegistration]);
+
+  // Remove handleVerifyEmail - no longer needed for OTP
+  const handleVerifyEmail = async () => {
+    // This function is no longer used - email verification happens via link click
+    // Keeping for backward compatibility but it won't be called
+  };
+
+  const handleResendVerificationCode = async () => {
+    // Handle registration resend with Supabase Auth
+    if (pendingRegistration && pendingRegistration.code === 'supabase-auth') {
+      try {
+        const email = pendingRegistration.userData.email || '';
+        await supabaseAuthService.resendVerificationEmail(email);
+        alert(`📧 Verification email resent to ${email}\n\nPlease check your email and click the verification link.`);
+      } catch (error: any) {
+        console.error('Resend error:', error);
+        alert("❌ Failed to resend email: " + (error.message || "Please try again."));
+      }
+      return;
+    }
     
-    // Simulate sending email
-    alert(`📧 Verification code sent to ${pendingEmailVerification.user.email}\n\nCode: ${newCode}\n\n(For testing purposes)`);
+    // Handle subordinate registration resend with Supabase Auth
+    if (pendingSubordinateRegistration && pendingSubordinateRegistration.code === 'supabase-auth') {
+      try {
+        const email = pendingSubordinateRegistration.userData.email || '';
+        await supabaseAuthService.resendVerificationEmail(email);
+        alert(`📧 Verification email resent to ${email}\n\nPlease check your email and click the verification link.`);
+      } catch (error: any) {
+        console.error('Resend error:', error);
+        alert("❌ Failed to resend email: " + (error.message || "Please try again."));
+      }
+      return;
+    }
   };
 
   const handleResendOTP = async () => {
@@ -687,37 +794,69 @@ const App: React.FC = () => {
 
   const handleRegister = async (userData: Partial<User>) => {
     if (!currentProjectId) return;
+    
+    // Validate required fields
+    if (!userData.email || !userData.name || !userData.username || !userData.password) {
+      alert("❌ Please fill all required fields.");
+      return;
+    }
+    
     try {
-      // Generate 6-digit verification code
-      const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+      // Use Supabase Auth to send email verification link
+      try {
+        await supabaseAuthService.signUp(
+          userData.email || '',
+          userData.password || '',
+          {
+            name: userData.name || 'Unknown',
+            username: userData.username || 'user_' + Date.now()
+          }
+        );
+      } catch (error: any) {
+        throw error;
+      }
       
-      const newUser: Omit<User, 'id'> = {
-        name: userData.name || 'Unknown',
-        email: userData.email || '',
-        username: userData.username || 'user_' + Date.now(),
-        role: Role.EMPLOYEE,
-        parentId: 'u1',
-        projectId: currentProjectId,
-        isEmailVerified: false, // Email verification is MANDATORY
-        isTwoStepEnabled: userData.isTwoStepEnabled || false, // 2-step is OPTIONAL
-        ...userData
-      };
-      
-      // Save to Supabase directly
-      const createdUser = await userService.create(newUser);
-      setUsers(prev => [...prev, createdUser]);
-      
-      // Set pending email verification
-      setPendingEmailVerification({
-        user: createdUser,
-        code: verificationCode
+      // Store registration data temporarily (NOT saved to Supabase users table yet)
+      setPendingRegistration({
+        userData: {
+          name: userData.name || 'Unknown',
+          email: userData.email || '',
+          username: userData.username || 'user_' + Date.now(),
+          role: Role.EMPLOYEE,
+          parentId: 'u1',
+          projectId: currentProjectId,
+          isEmailVerified: false, // Will be set to true after verification
+          isTwoStepEnabled: userData.isTwoStepEnabled || false,
+          password: userData.password,
+          employeeId: userData.employeeId,
+          department: userData.department,
+          subDepartment: userData.subDepartment,
+          designation: userData.designation,
+          dob: userData.dob,
+          contactNo: userData.contactNo,
+          profilePhoto: userData.profilePhoto,
+          telegramUserId: userData.telegramUserId,
+          telegramToken: userData.telegramToken
+        },
+        code: 'supabase-auth' // Mark as Supabase Auth email link
       });
       
-      // Simulate sending email
-      alert(`📧 Verification code sent to ${createdUser.email}\n\nCode: ${verificationCode}\n\n(For testing purposes - Please verify your email to continue)`);
+      // Set pending email verification for UI
+      setPendingEmailVerification({
+        user: {
+          id: 'pending',
+          name: userData.name || 'Unknown',
+          email: userData.email || '',
+          username: userData.username || '',
+          role: Role.EMPLOYEE
+        },
+        code: 'supabase-auth'
+      });
+      
+      alert(`📧 Verification email sent to ${userData.email}\n\nPlease check your email and click the verification link to complete registration.`);
     } catch (error: any) {
       console.error('Registration error:', error);
-      alert("❌ Failed to create account: " + (error.message || "Please try again."));
+      alert("❌ Failed to send verification email: " + (error.message || "Please try again."));
     }
   };
 
@@ -860,26 +999,69 @@ const App: React.FC = () => {
 
   const addSubordinate = async (userData: Partial<User>) => {
     if (!currentUser || !currentProjectId) return;
+    
+    // Validate required fields
+    if (!userData.email || !userData.name || !userData.username || !userData.password) {
+      alert("❌ Please fill all required fields (Name, Email, Username, Password).");
+      return;
+    }
+    
     try {
-      const newUser: Omit<User, 'id'> = {
-        name: userData.name || 'New Personnel',
-        email: userData.email || '',
-        username: userData.username || 'user_' + Date.now(),
-        role: userData.role || Role.EMPLOYEE,
-        parentId: currentUser.id,
-        projectId: currentProjectId,
-        isEmailVerified: false,
-        isTwoStepEnabled: false,
-        ...userData
-      };
+      // Use Supabase Auth to send email verification link
+      try {
+        await supabaseAuthService.signUp(
+          userData.email || '',
+          userData.password || '',
+          {
+            name: userData.name || 'Unknown',
+            username: userData.username || 'user_' + Date.now()
+          }
+        );
+      } catch (error: any) {
+        throw error;
+      }
       
-      // Save to Supabase
-      const createdUser = await userService.create(newUser);
-      setUsers(prev => [...prev, createdUser]);
-      alert(`${createdUser.name || createdUser.username} Connected Successfully`);
+      // Store subordinate registration data temporarily (NOT saved to Supabase users table yet)
+      setPendingSubordinateRegistration({
+        userData: {
+          name: userData.name || 'Unknown',
+          email: userData.email || '',
+          username: userData.username || 'user_' + Date.now(),
+          role: userData.role || Role.EMPLOYEE,
+          parentId: currentUser.id,
+          projectId: currentProjectId,
+          isEmailVerified: false, // Will be set to true after verification
+          isTwoStepEnabled: userData.isTwoStepEnabled || false,
+          password: userData.password,
+          employeeId: userData.employeeId,
+          department: userData.department,
+          subDepartment: userData.subDepartment,
+          designation: userData.designation,
+          dob: userData.dob,
+          contactNo: userData.contactNo,
+          profilePhoto: userData.profilePhoto,
+          telegramUserId: userData.telegramUserId,
+          telegramToken: userData.telegramToken
+        },
+        code: 'supabase-auth' // Mark as Supabase Auth email link
+      });
+      
+      // Set pending email verification for UI
+      setPendingEmailVerification({
+        user: {
+          id: 'pending-subordinate',
+          name: userData.name || 'Unknown',
+          email: userData.email || '',
+          username: userData.username || '',
+          role: userData.role || Role.EMPLOYEE
+        },
+        code: 'supabase-auth'
+      });
+      
+      alert(`📧 Verification email sent to ${userData.email}\n\nPlease check your email and click the verification link to complete personnel creation.`);
     } catch (error: any) {
       console.error('Add subordinate error:', error);
-      alert("❌ Failed to add personnel. Please try again.");
+      alert("❌ Failed to send verification email: " + (error.message || "Please try again."));
     }
   };
 
@@ -1032,7 +1214,25 @@ const App: React.FC = () => {
           needsTwoStep={needsTwoStep}
           onNavigateToAdminUsers={() => setView('admin-users')}
           allUsers={scopedUsers}
-          pendingEmailVerification={pendingEmailVerification}
+          pendingEmailVerification={pendingEmailVerification || (pendingRegistration ? {
+            user: {
+              id: 'pending',
+              name: pendingRegistration.userData.name || 'Unknown',
+              email: pendingRegistration.userData.email || '',
+              username: pendingRegistration.userData.username || '',
+              role: pendingRegistration.userData.role || Role.EMPLOYEE
+            },
+            code: pendingRegistration.code
+          } : null) || (pendingSubordinateRegistration ? {
+            user: {
+              id: 'pending-subordinate',
+              name: pendingSubordinateRegistration.userData.name || 'Unknown',
+              email: pendingSubordinateRegistration.userData.email || '',
+              username: pendingSubordinateRegistration.userData.username || '',
+              role: pendingSubordinateRegistration.userData.role || Role.EMPLOYEE
+            },
+            code: pendingSubordinateRegistration.code
+          } : null)}
           onVerifyEmail={handleVerifyEmail}
           onResendVerificationCode={handleResendVerificationCode}
           onResendOTP={handleResendOTP}

@@ -53,6 +53,8 @@ export const AuthView: React.FC<AuthViewProps> = ({
   
   const [isAddingSub, setIsAddingSub] = useState(false);
   const [showAllUsers, setShowAllUsers] = useState(false);
+  const [hasSubmittedSubordinateForm, setHasSubmittedSubordinateForm] = useState(false);
+  const [hasSubmittedRegistrationForm, setHasSubmittedRegistrationForm] = useState(false);
   const [form, setForm] = useState({
     name: '', email: '', username: '', dob: '', department: '', subDepartment: '',
     designation: '', employeeId: '', contactNo: '', password: '',
@@ -317,28 +319,91 @@ export const AuthView: React.FC<AuthViewProps> = ({
     });
   };
 
+  // Close add subordinate form after email verification completes
+  useEffect(() => {
+    // Only close if we've actually submitted the form and verification is complete
+    if (!hasSubmittedSubordinateForm) {
+      // Form was just opened, don't close it
+      return;
+    }
+    
+    // If verification is pending, keep form open
+    if (pendingEmailVerification && pendingEmailVerification.user.id === 'pending-subordinate') {
+      // Form is open and verification is pending - keep it open
+      return;
+    }
+    
+    // If we submitted and verification completed (pendingEmailVerification is null or different user), close form
+    if (hasSubmittedSubordinateForm && (!pendingEmailVerification || pendingEmailVerification.user.id !== 'pending-subordinate')) {
+      // Small delay to show success message
+      const timer = setTimeout(() => {
+        resetForm();
+        setIsAddingSub(false);
+        setHasSubmittedSubordinateForm(false); // Reset flag
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [pendingEmailVerification, isAddingSub, hasSubmittedSubordinateForm]);
+
+  // Close registration form after email verification completes
+  useEffect(() => {
+    // Only close if we've actually submitted the form and verification is complete
+    if (!hasSubmittedRegistrationForm) {
+      // Form was just opened, don't close it
+      return;
+    }
+    
+    // If verification is pending, keep form open (verification screen will show)
+    if (pendingEmailVerification && (pendingEmailVerification.user.id === 'pending' || pendingEmailVerification.user.id === 'pending-subordinate')) {
+      // Form is open and verification is pending - keep it open
+      return;
+    }
+    
+    // If we submitted and verification completed (pendingEmailVerification is null or different user), close form
+    if (hasSubmittedRegistrationForm && (!pendingEmailVerification || (pendingEmailVerification.user.id !== 'pending' && pendingEmailVerification.user.id !== 'pending-subordinate'))) {
+      // Small delay to show success message
+      const timer = setTimeout(() => {
+        resetForm();
+        setIsNew(false);
+        setHasSubmittedRegistrationForm(false); // Reset flag
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [pendingEmailVerification, isNew, hasSubmittedRegistrationForm]);
+
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name || !form.email || !form.username || !targetRole || !onAddSubordinate) return;
+    
+    // Mark that we've submitted the form
+    setHasSubmittedSubordinateForm(true);
+    
+    // Call onAddSubordinate which will trigger email verification
+    // Don't close form or reset yet - wait for email verification
     onAddSubordinate({
       ...form,
       role: targetRole,
       username: form.username.toLowerCase().replace(/\s/g, '_')
     });
-    resetForm();
-    setIsAddingSub(false);
+    
+    // Form will close automatically after email verification completes
+    // Don't reset or close here - let email verification flow handle it
   };
 
   const handleRegisterSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name || !form.email || !form.username || !form.password || !onRegister) return;
+    
+    // Mark that we've submitted the form
+    setHasSubmittedRegistrationForm(true);
+    
     onRegister({
       ...form,
       role: Role.EMPLOYEE,
       username: form.username.toLowerCase().replace(/\s/g, '_')
     });
-    setIsNew(false);
-    resetForm();
+    // Don't close form immediately - let email verification screen show
+    // Form will close after email verification completes
   };
 
   if (currentUser) {
@@ -689,7 +754,21 @@ export const AuthView: React.FC<AuthViewProps> = ({
                 <Users size={16} className="text-orange-600" /> Personnel Boarding
               </h3>
               <button 
-                onClick={() => { setIsAddingSub(!isAddingSub); resetForm(); }}
+                onClick={(e) => { 
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setIsAddingSub(!isAddingSub); 
+                  if (!isAddingSub) {
+                    resetForm();
+                    setHasSubmittedSubordinateForm(false); // Reset flag when opening
+                  } else {
+                    setHasSubmittedSubordinateForm(false); // Reset flag when closing
+                  }
+                }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
                 className={`p-2 rounded-xl transition-all ${isAddingSub ? 'bg-orange-600 text-white shadow-lg' : 'bg-white text-orange-600 border border-orange-100 shadow-sm'}`}
               >
                 {isAddingSub ? <X size={18} /> : <UserPlus size={18} />}
@@ -697,7 +776,12 @@ export const AuthView: React.FC<AuthViewProps> = ({
             </div>
 
             {isAddingSub && (
-              <form onSubmit={handleAddSubmit} className="bg-white p-5 rounded-3xl border-2 border-orange-100 shadow-xl animate-in slide-in-from-top-4 space-y-6">
+              <form 
+                onSubmit={handleAddSubmit} 
+                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                className="bg-white p-5 rounded-3xl border-2 border-orange-100 shadow-xl animate-in slide-in-from-top-4 space-y-6"
+              >
                 <div className="text-center">
                   <div 
                     onClick={() => photoInputRef.current?.click()}
@@ -821,60 +905,56 @@ export const AuthView: React.FC<AuthViewProps> = ({
             <div className="space-y-2">
               <h3 className="text-xl font-black text-slate-900 uppercase">Email Verification Required</h3>
               <p className="text-xs text-slate-500 font-medium">
-                We've sent a verification code to<br />
+                We've sent a verification link to<br />
                 <span className="font-bold text-orange-600">{pendingEmailVerification.user.email}</span>
               </p>
+              {(pendingEmailVerification.user.id === 'pending' || pendingEmailVerification.user.id === 'pending-subordinate') && (
+                <p className="text-[10px] text-amber-600 font-medium">
+                  ⚠️ Click the link in your email to verify and create your account
+                </p>
+              )}
             </div>
             
-            <div className="relative mt-4">
-              <div className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400 pointer-events-none">
-                <Key size={16} />
+            <div className="bg-orange-50 border-2 border-orange-200 rounded-2xl p-6 space-y-3">
+              <div className="flex items-start gap-3 text-left">
+                <div className="w-8 h-8 bg-orange-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <Mail size={16} className="text-orange-600" />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-xs font-black text-slate-900 uppercase mb-1">Check Your Email</h4>
+                  <p className="text-[10px] text-slate-600 font-medium leading-relaxed">
+                    1. Open your email inbox (Gmail, Outlook, etc.)<br />
+                    2. Look for an email from Supabase<br />
+                    3. Click the verification link in the email<br />
+                    4. You'll be redirected back to complete registration
+                  </p>
+                </div>
               </div>
-              <input 
-                autoFocus
-                type="text"
-                maxLength={6}
-                className="w-full pl-10 pr-4 py-4 bg-slate-50 border-2 border-transparent focus:border-orange-500 rounded-2xl text-center text-xl font-black tracking-[0.5em] transition-all"
-                placeholder="000000"
-                value={emailVerificationCode}
-                onChange={(e) => setEmailVerificationCode(e.target.value.replace(/\D/g, ''))}
-              />
             </div>
 
             <button 
               onClick={() => {
-                if (emailVerificationCode.length === 6 && onVerifyEmail) {
-                  onVerifyEmail(emailVerificationCode);
-                  setEmailVerificationCode('');
-                } else {
-                  alert('Please enter a 6-digit verification code');
-                }
-              }}
-              className="w-full py-5 bg-orange-600 text-white font-black uppercase tracking-widest rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-orange-100 active:scale-95 transition-all"
-            >
-              Verify Email
-            </button>
-            
-            <button 
-              onClick={() => {
                 if (onResendVerificationCode) {
                   onResendVerificationCode();
-                  setEmailVerificationCode('');
                 }
               }}
-              className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-orange-600 transition-colors"
+              className="w-full py-4 bg-slate-100 text-slate-700 font-black uppercase tracking-widest rounded-2xl flex items-center justify-center gap-2 hover:bg-slate-200 transition-all active:scale-95"
             >
-              Resend Code
+              <Mail size={18} />
+              Resend Verification Email
             </button>
             
-            <div className="pt-4 border-t border-slate-100">
-              <p className="text-[9px] text-slate-400 font-medium">
-                For testing: Code is <span className="font-bold text-orange-600">{pendingEmailVerification.code}</span>
-              </p>
-            </div>
+            <p className="text-[9px] text-slate-400 font-medium text-center">
+              Didn't receive the email? Check your spam folder or click "Resend Verification Email" above.
+            </p>
           </div>
         ) : isNew ? (
-          <form onSubmit={handleRegisterSubmit} className="space-y-4 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm animate-in zoom-in-95">
+          <form 
+            onSubmit={handleRegisterSubmit} 
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            className="space-y-4 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm animate-in zoom-in-95"
+          >
             <h3 className="text-center text-sm font-black uppercase text-slate-800 mb-2">Request Corporate ID</h3>
             <div className="space-y-3">
               <Input placeholder="Full Name" value={form.name} onChange={(v: string) => setForm({...form, name: v})} required icon={<UserCircle size={16}/>} />
@@ -889,7 +969,10 @@ export const AuthView: React.FC<AuthViewProps> = ({
               </button>
               <button 
                 type="button"
-                onClick={() => setIsNew(false)}
+                onClick={() => {
+                  setIsNew(false);
+                  setHasSubmittedRegistrationForm(false); // Reset flag when closing
+                }}
                 className="w-full text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-orange-600 transition-colors pt-2"
               >
                 Back to Authentication
@@ -981,7 +1064,17 @@ export const AuthView: React.FC<AuthViewProps> = ({
             </button>
             
             <button 
-              onClick={() => { setIsNew(true); resetForm(); }}
+              onClick={(e) => { 
+                e.preventDefault();
+                e.stopPropagation();
+                setIsNew(true); 
+                resetForm();
+                setHasSubmittedRegistrationForm(false); // Reset flag when opening
+              }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+              }}
               className="w-full text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-orange-600 transition-colors pt-4"
             >
               New Personnel? Request Corporate ID
