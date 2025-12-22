@@ -12,9 +12,8 @@ import {
   messageService, 
   groupService, 
   emailService,
-  otpService
+  supabase 
 } from './services/supabaseService';
-import { supabaseAuthService } from './services/supabaseAuthService';
 import { TaskCard } from './components/TaskCard';
 import { NoteCard } from './components/NoteCard';
 import { AddTaskModal } from './components/AddTaskModal';
@@ -27,7 +26,6 @@ import { ChatView } from './components/ChatView';
 import { FeedView } from './components/FeedView';
 import { ProjectsView } from './components/ProjectsView';
 import { EmailsView } from './components/EmailsView';
-import { AdminUsersView } from './components/AdminUsersView';
 import { 
   Plus, 
   Calendar, 
@@ -90,282 +88,482 @@ const App: React.FC = () => {
   // Login flow state
   const [needsTwoStep, setNeedsTwoStep] = useState(false);
   const [pendingUser, setPendingUser] = useState<User | null>(null);
-  const [pendingEmailVerification, setPendingEmailVerification] = useState<{ user: User; code: string } | null>(null);
-  const [pendingRegistration, setPendingRegistration] = useState<{ userData: Partial<User>; code: string } | null>(null);
-  const [pendingSubordinateRegistration, setPendingSubordinateRegistration] = useState<{ userData: Partial<User>; code: string } | null>(null);
 
-  // Load ALL data from Supabase on mount (not localStorage)
+  // Helper function to map Supabase data to TypeScript types
+  const mapUserFromSupabase = (u: any): User => ({
+    id: u.id,
+    name: u.name,
+    email: u.email,
+    username: u.username,
+    role: u.role as Role,
+    parentId: u.parent_id || u.parentId,
+    projectId: u.project_id || u.projectId,
+    employeeId: u.employee_id || u.employeeId,
+    department: u.department,
+    subDepartment: u.sub_department || u.subDepartment,
+    designation: u.designation,
+    dob: u.dob,
+    contactNo: u.contact_no || u.contactNo,
+    profilePhoto: u.profile_photo || u.profilePhoto,
+    password: u.password,
+    isTwoStepEnabled: u.is_two_step_enabled !== undefined ? u.is_two_step_enabled : u.isTwoStepEnabled,
+    isEmailVerified: u.is_email_verified !== undefined ? u.is_email_verified : u.isEmailVerified,
+    telegramUserId: u.telegram_user_id || u.telegramUserId,
+    telegramToken: u.telegram_token || u.telegramToken
+  });
+
+  // Load initial data from Supabase
   useEffect(() => {
-    const loadAllDataFromSupabase = async () => {
+    const loadInitialData = async () => {
       try {
-        // Load Users
+        // Load users
         const supabaseUsers = await userService.getAll();
         if (supabaseUsers && supabaseUsers.length > 0) {
-          const mappedUsers = supabaseUsers.map((u: any) => ({
-            id: u.id,
-            name: u.name,
-            email: u.email,
-            username: u.username,
-            role: u.role as Role,
-            parentId: u.parent_id || u.parentId,
-            projectId: u.project_id || u.projectId,
-            employeeId: u.employee_id || u.employeeId,
-            department: u.department,
-            subDepartment: u.sub_department || u.subDepartment,
-            designation: u.designation,
-            dob: u.dob,
-            contactNo: u.contact_no || u.contactNo,
-            profilePhoto: u.profile_photo || u.profilePhoto,
-            password: u.password,
-            isTwoStepEnabled: u.is_two_step_enabled !== undefined ? u.is_two_step_enabled : u.isTwoStepEnabled,
-            isEmailVerified: u.is_email_verified !== undefined ? u.is_email_verified : u.isEmailVerified,
-            telegramUserId: u.telegram_user_id || u.telegramUserId,
-            telegramToken: u.telegram_token || u.telegramToken
-          }));
+          const mappedUsers = supabaseUsers.map(mapUserFromSupabase);
           setUsers(mappedUsers);
-          console.log('✅ Loaded users from Supabase:', mappedUsers.length);
         }
 
-        // Load Projects
+        // Load projects
         const supabaseProjects = await projectService.getAll();
         if (supabaseProjects && supabaseProjects.length > 0) {
-          const mappedProjects = supabaseProjects.map((p: any) => ({
-            id: p.id,
-            name: p.name,
-            managerName: p.manager_name,
-            password: p.password,
-            domain: p.domain,
-            createdAt: p.created_at
-          }));
-          setProjects(mappedProjects);
-          console.log('✅ Loaded projects from Supabase:', mappedProjects.length);
-        }
-
-        // Load Tasks (for current project)
-        if (currentProjectId) {
-          const supabaseTasks = await taskService.getByProject(currentProjectId);
-          if (supabaseTasks && supabaseTasks.length > 0) {
-            const mappedTasks = supabaseTasks.map((t: any) => ({
-              id: t.id,
-              projectId: t.project_id,
-              title: t.title,
-              description: t.description,
-              priority: t.priority as Priority,
-              completed: t.completed,
-              category: t.category,
-              dueDate: t.due_date,
-              createdAt: t.created_at,
-              subTasks: t.sub_tasks || [],
-              assignedBy: t.assigned_by,
-              assignedTo: t.assigned_to
-            }));
-            setTasks(mappedTasks);
-            console.log('✅ Loaded tasks from Supabase:', mappedTasks.length);
+          setProjects(supabaseProjects);
+          if (supabaseProjects[0]?.id) {
+            setCurrentProjectId(supabaseProjects[0].id);
+          }
+        } else {
+          // Create default project if none exists
+          const defaultProject: Project = {
+            id: 'p_default',
+            name: 'Main Enterprise',
+            managerName: 'Admin',
+            domain: 'srj.com',
+            createdAt: new Date().toISOString()
+          };
+          try {
+            await projectService.create(defaultProject);
+            setProjects([defaultProject]);
+            setCurrentProjectId('p_default');
+          } catch (error) {
+            console.error('Failed to create default project:', error);
+            setProjects([defaultProject]);
+            setCurrentProjectId('p_default');
           }
         }
-
-        // Load Notes
-        if (currentProjectId) {
-          const supabaseNotes = await noteService.getByProject(currentProjectId);
-          if (supabaseNotes && supabaseNotes.length > 0) {
-            const mappedNotes = supabaseNotes.map((n: any) => ({
-              id: n.id,
-              projectId: n.project_id,
-              title: n.title,
-              content: n.content,
-              color: n.color,
-              createdAt: n.created_at
-            }));
-            setNotes(mappedNotes);
-            console.log('✅ Loaded notes from Supabase:', mappedNotes.length);
-          }
+      } catch (error) {
+        console.error('Failed to load initial data from Supabase:', error);
+        // Fallback to localStorage if Supabase fails
+        const savedUsers = localStorage.getItem('srj_users');
+        const savedProjects = localStorage.getItem('srj_projects');
+        if (savedUsers) setUsers(JSON.parse(savedUsers));
+        if (savedProjects) {
+          const parsed = JSON.parse(savedProjects);
+          setProjects(parsed);
+          if (parsed[0]?.id) setCurrentProjectId(parsed[0].id);
         }
-
-        // Load Posts
-        if (currentProjectId) {
-          const supabasePosts = await postService.getByProject(currentProjectId);
-          if (supabasePosts && supabasePosts.length > 0) {
-            const mappedPosts = supabasePosts.map((p: any) => ({
-              id: p.id,
-              projectId: p.project_id,
-              userId: p.user_id,
-              userName: p.user_name,
-              userUsername: p.user_username,
-              text: p.text,
-              image: p.image,
-              video: p.video,
-              ratio: p.ratio,
-              likes: p.likes || [],
-              mentions: p.mentions || [],
-              hashtags: p.hashtags || [],
-              comments: p.comments || [],
-              createdAt: p.created_at
-            }));
-            setPosts(mappedPosts);
-            console.log('✅ Loaded posts from Supabase:', mappedPosts.length);
-          }
-        }
-
-        // Load Complaints
-        if (currentProjectId) {
-          const supabaseComplaints = await complaintService.getByProject(currentProjectId);
-          if (supabaseComplaints && supabaseComplaints.length > 0) {
-            const mappedComplaints = supabaseComplaints.map((c: any) => ({
-              id: c.id,
-              projectId: c.project_id,
-              userId: c.user_id,
-              userName: c.user_name,
-              userRole: c.user_role as Role,
-              subject: c.subject,
-              message: c.message,
-              status: c.status,
-              createdAt: c.created_at,
-              attachment: c.attachment
-            }));
-            setComplaints(mappedComplaints);
-            console.log('✅ Loaded complaints from Supabase:', mappedComplaints.length);
-          }
-        }
-
-        // Load Emails
-        if (currentProjectId) {
-          const supabaseEmails = await emailService.getByProject(currentProjectId);
-          if (supabaseEmails && supabaseEmails.length > 0) {
-            const mappedEmails = supabaseEmails.map((e: any) => ({
-              id: e.id,
-              projectId: e.project_id,
-              senderId: e.sender_id,
-              senderEmail: e.sender_email,
-              receiverEmail: e.receiver_email,
-              cc: e.cc || [],
-              bcc: e.bcc || [],
-              subject: e.subject,
-              body: e.body,
-              read: e.read,
-              starred: e.starred,
-              attachments: e.attachments || [],
-              createdAt: e.created_at
-            }));
-            setEmails(mappedEmails);
-            console.log('✅ Loaded emails from Supabase:', mappedEmails.length);
-          }
-        }
-
-        // Load Messages
-        if (currentProjectId) {
-          const supabaseMessages = await messageService.getByProject(currentProjectId);
-          if (supabaseMessages && supabaseMessages.length > 0) {
-            const mappedMessages = supabaseMessages.map((m: any) => ({
-              id: m.id,
-              projectId: m.project_id,
-              senderId: m.sender_id,
-              receiverId: m.receiver_id,
-              groupId: m.group_id,
-              text: m.text,
-              attachment: m.attachment,
-              callInfo: m.call_info,
-              status: m.status,
-              replyToId: m.reply_to_id,
-              mentions: m.mentions || [],
-              createdAt: m.created_at
-            }));
-            setMessages(mappedMessages);
-            console.log('✅ Loaded messages from Supabase:', mappedMessages.length);
-          }
-        }
-
-        // Load Groups
-        if (currentProjectId) {
-          const supabaseGroups = await groupService.getByProject(currentProjectId);
-          if (supabaseGroups && supabaseGroups.length > 0) {
-            const mappedGroups = supabaseGroups.map((g: any) => ({
-              id: g.id,
-              projectId: g.project_id,
-              name: g.name,
-              description: g.description,
-              createdBy: g.created_by,
-              members: g.members || [],
-              activeCall: g.active_call,
-              createdAt: g.created_at
-            }));
-            setGroups(mappedGroups);
-            console.log('✅ Loaded groups from Supabase:', mappedGroups.length);
-          }
-        }
-
-        console.log('✅ All data loaded from Supabase successfully!');
-      } catch (error: any) {
-        console.error('❌ Failed to load data from Supabase:', error);
-        console.log('📦 Using localStorage as fallback');
       }
     };
-    
-    loadAllDataFromSupabase();
-  }, [currentProjectId]);
 
-  // Initial Data & Auth Persistence
-  useEffect(() => {
-    const savedProjects = localStorage.getItem('srj_projects');
-    const savedCurrentProjectId = localStorage.getItem('srj_active_project_id');
-    const savedUsers = localStorage.getItem('srj_users');
-    const savedCurrentUser = localStorage.getItem('srj_current_user');
-    const savedTasks = localStorage.getItem('srj_tasks');
-    const savedNotes = localStorage.getItem('srj_notes');
-    const savedPosts = localStorage.getItem('srj_posts');
-    const savedComplaints = localStorage.getItem('srj_complaints');
-    const savedNotifications = localStorage.getItem('srj_notifications');
-    const savedMessages = localStorage.getItem('srj_messages');
-    const savedGroups = localStorage.getItem('srj_groups');
-    const savedEmails = localStorage.getItem('srj_emails');
-
-    if (savedProjects) {
-      setProjects(JSON.parse(savedProjects));
-    } else {
-      const defaultProject: Project = {
-        id: 'p_default',
-        name: 'Main Enterprise',
-        managerName: 'Admin',
-        domain: 'srj.com',
-        createdAt: new Date().toISOString()
-      };
-      setProjects([defaultProject]);
-      localStorage.setItem('srj_projects', JSON.stringify([defaultProject]));
-    }
-
-    if (savedCurrentProjectId) {
-      setCurrentProjectId(savedCurrentProjectId);
-    } else {
-      setCurrentProjectId('p_default');
-    }
-
-    // Load users from localStorage as fallback (will be overridden by Supabase if available)
-    if (savedUsers) {
-      const parsedUsers = JSON.parse(savedUsers);
-      setUsers(parsedUsers);
-    }
-
-    if (savedCurrentUser) setCurrentUser(JSON.parse(savedCurrentUser));
-    if (savedTasks) setTasks(JSON.parse(savedTasks));
-    if (savedNotes) setNotes(JSON.parse(savedNotes));
-    if (savedPosts) setPosts(JSON.parse(savedPosts));
-    if (savedComplaints) setComplaints(JSON.parse(savedComplaints));
-    if (savedNotifications) setNotifications(JSON.parse(savedNotifications));
-    if (savedMessages) setMessages(JSON.parse(savedMessages));
-    if (savedGroups) setGroups(JSON.parse(savedGroups));
-    if (savedEmails) setEmails(JSON.parse(savedEmails));
+    loadInitialData();
   }, []);
 
-  // Sync Logic
-  // Sync Logic - Only sync currentUser and projectId to localStorage (for session)
-  // All other data is now in Supabase and syncs automatically across devices
-  useEffect(() => { if(currentProjectId) localStorage.setItem('srj_active_project_id', currentProjectId) }, [currentProjectId]);
-  
-  // Optional: Cache users in localStorage for offline support (but Supabase is primary)
+  // Load current user from localStorage on mount
   useEffect(() => {
-    if (users.length > 0) {
-      localStorage.setItem('srj_users', JSON.stringify(users));
+    const savedCurrentUser = localStorage.getItem('srj_current_user');
+    if (savedCurrentUser) {
+      try {
+        const user = JSON.parse(savedCurrentUser);
+        setCurrentUser(user);
+        if (user.projectId) setCurrentProjectId(user.projectId);
+      } catch (error) {
+        console.error('Failed to parse saved user:', error);
+      }
     }
-  }, [users]);
+  }, []);
+
+  // Load project-specific data and set up real-time subscriptions
+  useEffect(() => {
+    if (!currentProjectId) return;
+
+    let subscriptions: any[] = [];
+
+    const loadProjectData = async () => {
+      try {
+        // Load tasks
+        const projectTasks = await taskService.getByProject(currentProjectId);
+        setTasks(projectTasks.map((t: any) => ({
+          ...t,
+          projectId: t.project_id || t.projectId,
+          assignedBy: t.assigned_by || t.assignedBy,
+          assignedTo: t.assigned_to || t.assignedTo,
+          dueDate: t.due_date || t.dueDate,
+          subTasks: t.sub_tasks || t.subTasks,
+          createdAt: t.created_at || t.createdAt
+        })));
+
+        // Load notes
+        const projectNotes = await noteService.getByProject(currentProjectId);
+        setNotes(projectNotes.map((n: any) => ({
+          ...n,
+          projectId: n.project_id || n.projectId,
+          createdAt: n.created_at || n.createdAt
+        })));
+
+        // Load posts
+        const projectPosts = await postService.getByProject(currentProjectId);
+        setPosts(projectPosts.map((p: any) => ({
+          ...p,
+          projectId: p.project_id || p.projectId,
+          userId: p.user_id || p.userId,
+          userName: p.user_name || p.userName,
+          userUsername: p.user_username || p.userUsername,
+          createdAt: p.created_at || p.createdAt
+        })));
+
+        // Load complaints
+        const projectComplaints = await complaintService.getByProject(currentProjectId);
+        setComplaints(projectComplaints.map((c: any) => ({
+          ...c,
+          projectId: c.project_id || c.projectId,
+          userId: c.user_id || c.userId,
+          userName: c.user_name || c.userName,
+          userRole: c.user_role || c.userRole,
+          createdAt: c.created_at || c.createdAt
+        })));
+
+        // Load messages
+        const projectMessages = await messageService.getByProject(currentProjectId);
+        setMessages(projectMessages.map((m: any) => ({
+          ...m,
+          projectId: m.project_id || m.projectId,
+          senderId: m.sender_id || m.senderId,
+          receiverId: m.receiver_id || m.receiverId,
+          groupId: m.group_id || m.groupId,
+          replyToId: m.reply_to_id || m.replyToId,
+          callInfo: m.call_info || m.callInfo,
+          createdAt: m.created_at || m.createdAt
+        })));
+
+        // Load groups
+        const projectGroups = await groupService.getByProject(currentProjectId);
+        setGroups(projectGroups.map((g: any) => ({
+          ...g,
+          projectId: g.project_id || g.projectId,
+          createdBy: g.created_by || g.createdBy,
+          activeCall: g.active_call || g.activeCall,
+          createdAt: g.created_at || g.createdAt
+        })));
+
+        // Load emails
+        const projectEmails = await emailService.getByProject(currentProjectId);
+        setEmails(projectEmails.map((e: any) => ({
+          ...e,
+          projectId: e.project_id || e.projectId,
+          senderId: e.sender_id || e.senderId,
+          senderEmail: e.sender_email || e.senderEmail,
+          receiverEmail: e.receiver_email || e.receiverEmail,
+          createdAt: e.created_at || e.createdAt
+        })));
+
+        // Load notifications for current user
+        if (currentUser) {
+          const userNotifications = await notificationService.getByUser(currentUser.id, currentProjectId);
+          setNotifications(userNotifications.map((n: any) => ({
+            ...n,
+            projectId: n.project_id || n.projectId,
+            userId: n.user_id || n.userId,
+            linkTo: n.link_to || n.linkTo,
+            createdAt: n.created_at || n.createdAt
+          })));
+        }
+      } catch (error) {
+        console.error('Failed to load project data:', error);
+      }
+    };
+
+    loadProjectData();
+
+    // Set up real-time subscriptions
+    const setupRealtimeSubscriptions = () => {
+      // Tasks subscription
+      const tasksSub = supabase
+        .channel('tasks_changes')
+        .on('postgres_changes', 
+          { event: '*', schema: 'public', table: 'tasks', filter: `project_id=eq.${currentProjectId}` },
+          async (payload) => {
+            if (payload.eventType === 'INSERT') {
+              const newTask = payload.new as any;
+              setTasks(prev => [...prev, {
+                ...newTask,
+                projectId: newTask.project_id || newTask.projectId,
+                assignedBy: newTask.assigned_by || newTask.assignedBy,
+                assignedTo: newTask.assigned_to || newTask.assignedTo,
+                dueDate: newTask.due_date || newTask.dueDate,
+                subTasks: newTask.sub_tasks || newTask.subTasks,
+                createdAt: newTask.created_at || newTask.createdAt
+              }]);
+            } else if (payload.eventType === 'UPDATE') {
+              const updatedTask = payload.new as any;
+              setTasks(prev => prev.map(t => t.id === updatedTask.id ? {
+                ...updatedTask,
+                projectId: updatedTask.project_id || updatedTask.projectId,
+                assignedBy: updatedTask.assigned_by || updatedTask.assignedBy,
+                assignedTo: updatedTask.assigned_to || updatedTask.assignedTo,
+                dueDate: updatedTask.due_date || updatedTask.dueDate,
+                subTasks: updatedTask.sub_tasks || updatedTask.subTasks,
+                createdAt: updatedTask.created_at || updatedTask.createdAt
+              } : t));
+            } else if (payload.eventType === 'DELETE') {
+              setTasks(prev => prev.filter(t => t.id !== payload.old.id));
+            }
+          }
+        )
+        .subscribe();
+
+      // Posts subscription
+      const postsSub = supabase
+        .channel('posts_changes')
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'posts', filter: `project_id=eq.${currentProjectId}` },
+          async (payload) => {
+            if (payload.eventType === 'INSERT') {
+              const newPost = payload.new as any;
+              setPosts(prev => [...prev, {
+                ...newPost,
+                projectId: newPost.project_id || newPost.projectId,
+                userId: newPost.user_id || newPost.userId,
+                userName: newPost.user_name || newPost.userName,
+                userUsername: newPost.user_username || newPost.userUsername,
+                createdAt: newPost.created_at || newPost.createdAt
+              }]);
+            } else if (payload.eventType === 'UPDATE') {
+              const updatedPost = payload.new as any;
+              setPosts(prev => prev.map(p => p.id === updatedPost.id ? {
+                ...updatedPost,
+                projectId: updatedPost.project_id || updatedPost.projectId,
+                userId: updatedPost.user_id || updatedPost.userId,
+                userName: updatedPost.user_name || updatedPost.userName,
+                userUsername: updatedPost.user_username || updatedPost.userUsername,
+                createdAt: updatedPost.created_at || updatedPost.createdAt
+              } : p));
+            } else if (payload.eventType === 'DELETE') {
+              setPosts(prev => prev.filter(p => p.id !== payload.old.id));
+            }
+          }
+        )
+        .subscribe();
+
+      // Messages subscription
+      const messagesSub = supabase
+        .channel('messages_changes')
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'messages', filter: `project_id=eq.${currentProjectId}` },
+          async (payload) => {
+            if (payload.eventType === 'INSERT') {
+              const newMessage = payload.new as any;
+              setMessages(prev => [...prev, {
+                ...newMessage,
+                projectId: newMessage.project_id || newMessage.projectId,
+                senderId: newMessage.sender_id || newMessage.senderId,
+                receiverId: newMessage.receiver_id || newMessage.receiverId,
+                groupId: newMessage.group_id || newMessage.groupId,
+                replyToId: newMessage.reply_to_id || newMessage.replyToId,
+                callInfo: newMessage.call_info || newMessage.callInfo,
+                createdAt: newMessage.created_at || newMessage.createdAt
+              }]);
+            } else if (payload.eventType === 'UPDATE') {
+              const updatedMessage = payload.new as any;
+              setMessages(prev => prev.map(m => m.id === updatedMessage.id ? {
+                ...updatedMessage,
+                projectId: updatedMessage.project_id || updatedMessage.projectId,
+                senderId: updatedMessage.sender_id || updatedMessage.senderId,
+                receiverId: updatedMessage.receiver_id || updatedMessage.receiverId,
+                groupId: updatedMessage.group_id || updatedMessage.groupId,
+                replyToId: updatedMessage.reply_to_id || updatedMessage.replyToId,
+                callInfo: updatedMessage.call_info || updatedMessage.callInfo,
+                createdAt: updatedMessage.created_at || updatedMessage.createdAt
+              } : m));
+            } else if (payload.eventType === 'DELETE') {
+              setMessages(prev => prev.filter(m => m.id !== payload.old.id));
+            }
+          }
+        )
+        .subscribe();
+
+      // Notifications subscription (for current user)
+      if (currentUser) {
+        const notificationsSub = supabase
+          .channel('notifications_changes')
+          .on('postgres_changes',
+            { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${currentUser.id}` },
+            async (payload) => {
+              if (payload.eventType === 'INSERT') {
+                const newNotif = payload.new as any;
+                setNotifications(prev => [...prev, {
+                  ...newNotif,
+                  projectId: newNotif.project_id || newNotif.projectId,
+                  userId: newNotif.user_id || newNotif.userId,
+                  linkTo: newNotif.link_to || newNotif.linkTo,
+                  createdAt: newNotif.created_at || newNotif.createdAt
+                }]);
+              } else if (payload.eventType === 'UPDATE') {
+                const updatedNotif = payload.new as any;
+                setNotifications(prev => prev.map(n => n.id === updatedNotif.id ? {
+                  ...updatedNotif,
+                  projectId: updatedNotif.project_id || updatedNotif.projectId,
+                  userId: updatedNotif.user_id || updatedNotif.userId,
+                  linkTo: updatedNotif.link_to || updatedNotif.linkTo,
+                  createdAt: updatedNotif.created_at || updatedNotif.createdAt
+                } : n));
+              } else if (payload.eventType === 'DELETE') {
+                setNotifications(prev => prev.filter(n => n.id !== payload.old.id));
+              }
+            }
+          )
+          .subscribe();
+        subscriptions.push(notificationsSub);
+      }
+
+      // Notes subscription
+      const notesSub = supabase
+        .channel('notes_changes')
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'notes', filter: `project_id=eq.${currentProjectId}` },
+          async (payload) => {
+            if (payload.eventType === 'INSERT') {
+              const newNote = payload.new as any;
+              setNotes(prev => [...prev, {
+                ...newNote,
+                projectId: newNote.project_id || newNote.projectId,
+                createdAt: newNote.created_at || newNote.createdAt
+              }]);
+            } else if (payload.eventType === 'UPDATE') {
+              const updatedNote = payload.new as any;
+              setNotes(prev => prev.map(n => n.id === updatedNote.id ? {
+                ...updatedNote,
+                projectId: updatedNote.project_id || updatedNote.projectId,
+                createdAt: updatedNote.created_at || updatedNote.createdAt
+              } : n));
+            } else if (payload.eventType === 'DELETE') {
+              setNotes(prev => prev.filter(n => n.id !== payload.old.id));
+            }
+          }
+        )
+        .subscribe();
+
+      // Complaints subscription
+      const complaintsSub = supabase
+        .channel('complaints_changes')
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'complaints', filter: `project_id=eq.${currentProjectId}` },
+          async (payload) => {
+            if (payload.eventType === 'INSERT') {
+              const newComplaint = payload.new as any;
+              setComplaints(prev => [...prev, {
+                ...newComplaint,
+                projectId: newComplaint.project_id || newComplaint.projectId,
+                userId: newComplaint.user_id || newComplaint.userId,
+                userName: newComplaint.user_name || newComplaint.userName,
+                userRole: newComplaint.user_role || newComplaint.userRole,
+                createdAt: newComplaint.created_at || newComplaint.createdAt
+              }]);
+            } else if (payload.eventType === 'UPDATE') {
+              const updatedComplaint = payload.new as any;
+              setComplaints(prev => prev.map(c => c.id === updatedComplaint.id ? {
+                ...updatedComplaint,
+                projectId: updatedComplaint.project_id || updatedComplaint.projectId,
+                userId: updatedComplaint.user_id || updatedComplaint.userId,
+                userName: updatedComplaint.user_name || updatedComplaint.userName,
+                userRole: updatedComplaint.user_role || updatedComplaint.userRole,
+                createdAt: updatedComplaint.created_at || updatedComplaint.createdAt
+              } : c));
+            } else if (payload.eventType === 'DELETE') {
+              setComplaints(prev => prev.filter(c => c.id !== payload.old.id));
+            }
+          }
+        )
+        .subscribe();
+
+      // Emails subscription
+      const emailsSub = supabase
+        .channel('emails_changes')
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'emails', filter: `project_id=eq.${currentProjectId}` },
+          async (payload) => {
+            if (payload.eventType === 'INSERT') {
+              const newEmail = payload.new as any;
+              setEmails(prev => [...prev, {
+                ...newEmail,
+                projectId: newEmail.project_id || newEmail.projectId,
+                senderId: newEmail.sender_id || newEmail.senderId,
+                senderEmail: newEmail.sender_email || newEmail.senderEmail,
+                receiverEmail: newEmail.receiver_email || newEmail.receiverEmail,
+                createdAt: newEmail.created_at || newEmail.createdAt
+              }]);
+            } else if (payload.eventType === 'UPDATE') {
+              const updatedEmail = payload.new as any;
+              setEmails(prev => prev.map(e => e.id === updatedEmail.id ? {
+                ...updatedEmail,
+                projectId: updatedEmail.project_id || updatedEmail.projectId,
+                senderId: updatedEmail.sender_id || updatedEmail.senderId,
+                senderEmail: updatedEmail.sender_email || updatedEmail.senderEmail,
+                receiverEmail: updatedEmail.receiver_email || updatedEmail.receiverEmail,
+                createdAt: updatedEmail.created_at || updatedEmail.createdAt
+              } : e));
+            } else if (payload.eventType === 'DELETE') {
+              setEmails(prev => prev.filter(e => e.id !== payload.old.id));
+            }
+          }
+        )
+        .subscribe();
+
+      // Groups subscription
+      const groupsSub = supabase
+        .channel('groups_changes')
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'groups', filter: `project_id=eq.${currentProjectId}` },
+          async (payload) => {
+            if (payload.eventType === 'INSERT') {
+              const newGroup = payload.new as any;
+              setGroups(prev => [...prev, {
+                ...newGroup,
+                projectId: newGroup.project_id || newGroup.projectId,
+                createdBy: newGroup.created_by || newGroup.createdBy,
+                activeCall: newGroup.active_call || newGroup.activeCall,
+                createdAt: newGroup.created_at || newGroup.createdAt
+              }]);
+            } else if (payload.eventType === 'UPDATE') {
+              const updatedGroup = payload.new as any;
+              setGroups(prev => prev.map(g => g.id === updatedGroup.id ? {
+                ...updatedGroup,
+                projectId: updatedGroup.project_id || updatedGroup.projectId,
+                createdBy: updatedGroup.created_by || updatedGroup.createdBy,
+                activeCall: updatedGroup.active_call || updatedGroup.activeCall,
+                createdAt: updatedGroup.created_at || updatedGroup.createdAt
+              } : g));
+            } else if (payload.eventType === 'DELETE') {
+              setGroups(prev => prev.filter(g => g.id !== payload.old.id));
+            }
+          }
+        )
+        .subscribe();
+
+      subscriptions.push(tasksSub, postsSub, messagesSub, notesSub, complaintsSub, emailsSub, groupsSub);
+    };
+
+    setupRealtimeSubscriptions();
+
+    // Cleanup subscriptions on unmount or project change
+    return () => {
+      subscriptions.forEach(sub => {
+        supabase.removeChannel(sub);
+      });
+    };
+  }, [currentProjectId, currentUser]);
+
+  // Keep localStorage sync only for current user (for offline persistence)
+  useEffect(() => { 
+    if (currentUser) localStorage.setItem('srj_current_user', JSON.stringify(currentUser));
+  }, [currentUser]);
 
   // Scoped Data Hooks
   const scopedUsers = useMemo(() => users.filter(u => u.projectId === currentProjectId || u.role === Role.ADMIN), [users, currentProjectId]);
@@ -381,130 +579,68 @@ const App: React.FC = () => {
   const activeProject = useMemo(() => projects.find(p => p.id === currentProjectId), [projects, currentProjectId]);
   const projectDomain = activeProject?.domain || 'srj.com';
 
-  const addNotification = (userId: string, title: string, message: string, type: Notification['type'], linkTo?: ViewType) => {
+  const addNotification = async (userId: string, title: string, message: string, type: Notification['type'], linkTo?: ViewType) => {
     if (!currentProjectId) return;
-    const newNotif: Notification = {
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-      projectId: currentProjectId,
-      userId,
-      title,
-      message,
-      type,
-      read: false,
-      createdAt: new Date().toISOString(),
-      linkTo
-    };
-    setNotifications(prev => [newNotif, ...prev]);
-  };
-
-  const handleCreateProject = (data: Omit<Project, 'id' | 'createdAt'>) => {
-    const newProject: Project = {
-      id: 'p_' + Date.now(),
-      ...data,
-      domain: data.domain || 'srj.com',
-      createdAt: new Date().toISOString()
-    };
-    setProjects(prev => [...prev, newProject]);
-    setCurrentProjectId(newProject.id);
-  };
-
-  const handleDeleteProject = (id: string) => {
-    if (id === 'p_default') return alert("Cannot delete main node.");
-    setProjects(prev => prev.filter(p => p.id !== id));
-    setTasks(prev => prev.filter(t => t.projectId !== id));
-    setPosts(prev => prev.filter(p => p.projectId !== id));
-    setUsers(prev => prev.filter(u => u.projectId !== id || u.role === Role.ADMIN));
-    if (currentProjectId === id) setCurrentProjectId('p_default');
-  };
-
-  const handleDeleteUser = async (userId: string) => {
-    if (!currentUser || currentUser.role !== Role.ADMIN) {
-      alert('Only admin can delete users!');
-      return;
-    }
-    
-    if (userId === currentUser.id) {
-      alert('You cannot delete your own account!');
-      return;
-    }
-
     try {
-      // Delete all related data from Supabase first
-      const userToDelete = users.find(u => u.id === userId);
-      if (!userToDelete) {
-        alert('User not found!');
-        return;
-      }
+      await notificationService.create({
+        projectId: currentProjectId,
+        userId,
+        title,
+        message,
+        type,
+        read: false,
+        linkTo
+      });
+      // Real-time subscription will update the state automatically
+    } catch (error) {
+      console.error('Failed to create notification:', error);
+      // Fallback: add to local state if database fails
+      const newNotif: Notification = {
+        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+        projectId: currentProjectId,
+        userId,
+        title,
+        message,
+        type,
+        read: false,
+        createdAt: new Date().toISOString(),
+        linkTo
+      };
+      setNotifications(prev => [newNotif, ...prev]);
+    }
+  };
 
-      // Delete tasks where user is assigned
-      const userTasks = tasks.filter(t => t.assignedTo === userId || t.assignedBy === userId);
-      for (const task of userTasks) {
-        await taskService.delete(task.id);
-      }
+  const handleCreateProject = async (data: Omit<Project, 'id' | 'createdAt'>) => {
+    try {
+      const newProject = await projectService.create({
+        ...data,
+        domain: data.domain || 'srj.com'
+      });
+      setProjects(prev => [...prev, newProject]);
+      setCurrentProjectId(newProject.id);
+    } catch (error) {
+      console.error('Failed to create project:', error);
+      alert('Failed to create project. Please try again.');
+    }
+  };
 
-      // Delete posts by user
-      const userPosts = posts.filter(p => p.userId === userId);
-      for (const post of userPosts) {
-        await postService.delete(post.id);
-      }
-
-      // Delete complaints by user
-      const userComplaints = complaints.filter(c => c.userId === userId);
-      for (const complaint of userComplaints) {
-        await complaintService.delete(complaint.id);
-      }
-
-      // Delete messages (keep messages but they'll show as "Deleted Account")
-      // Actually, we'll keep messages for history, but mark sender/receiver as deleted
-      const userMessages = messages.filter(m => m.senderId === userId || m.receiverId === userId);
-      // We'll keep messages but they'll show "Deleted Account" in UI
-
-      // Delete notifications for user
-      const userNotifications = notifications.filter(n => n.userId === userId);
-      for (const notification of userNotifications) {
-        await notificationService.delete(notification.id);
-      }
-
-      // Delete emails sent/received by user
-      const userEmails = emails.filter(e => e.senderId === userId || e.receiverEmail === userToDelete.email);
-      for (const email of userEmails) {
-        await emailService.delete(email.id);
-      }
-
-      // Remove user from groups (update groups to remove user from members array)
-      const userGroups = groups.filter(g => g.members.includes(userId));
-      for (const group of userGroups) {
-        const updatedMembers = group.members.filter(m => m !== userId);
-        await groupService.update(group.id, { members: updatedMembers });
-      }
-
-      // Finally, delete the user from Supabase
-      await userService.delete(userId);
-      
-      // Update local state
-      setUsers(prev => prev.filter(u => u.id !== userId));
-      
-      // Update local state for related data (remove deleted items)
-      setTasks(prev => prev.filter(t => t.assignedTo !== userId && t.assignedBy !== userId));
-      setPosts(prev => prev.filter(p => p.userId !== userId));
-      setComplaints(prev => prev.filter(c => c.userId !== userId));
-      // Keep messages but they'll show "Deleted Account"
-      setNotifications(prev => prev.filter(n => n.userId !== userId));
-      setEmails(prev => prev.filter(e => e.senderId !== userId && e.receiverEmail !== userToDelete.email));
-      setGroups(prev => prev.map(g => ({
-        ...g,
-        members: g.members.filter(m => m !== userId)
-      })));
-      
-      alert('User and all related data deleted successfully!');
-    } catch (error: any) {
-      console.error('Error deleting user:', error);
-      alert('Failed to delete user: ' + (error.message || 'Unknown error'));
+  const handleDeleteProject = async (id: string) => {
+    if (id === 'p_default') return alert("Cannot delete main node.");
+    try {
+      await projectService.delete(id);
+      setProjects(prev => prev.filter(p => p.id !== id));
+      setTasks(prev => prev.filter(t => t.projectId !== id));
+      setPosts(prev => prev.filter(p => p.projectId !== id));
+      setUsers(prev => prev.filter(u => u.projectId !== id || u.role === Role.ADMIN));
+      if (currentProjectId === id) setCurrentProjectId('p_default');
+    } catch (error) {
+      console.error('Failed to delete project:', error);
+      alert('Failed to delete project. Please try again.');
     }
   };
 
   const handleLogin = async (username: string, password?: string, code?: string) => {
-    if (!needsTwoStep && !pendingEmailVerification && !pendingRegistration && !pendingSubordinateRegistration) {
+    if (!needsTwoStep) {
       // Remove @ symbol if user typed it and trim whitespace
       const cleanUsername = username.replace('@', '').trim().toLowerCase();
       const cleanPassword = password?.trim();
@@ -550,27 +686,11 @@ const App: React.FC = () => {
           return;
         }
         
-        // Email verification is OPTIONAL - users can login without verifying email
-        // (Email verification can be done later from profile settings)
-        
-        // Check 2-step verification (OPTIONAL)
         if (user.isTwoStepEnabled) {
-          try {
-            // Generate OTP and send to user
-            const otpCode = await otpService.generateOTP(user.id);
-            
-            // In production, send OTP via email/SMS
-            // For now, show in alert (remove in production)
-            alert(`🔐 2-Step Verification\n\nA verification code has been sent to ${user.email}\n\nCode: ${otpCode}\n\n(For testing - expires in 5 minutes)`);
-            
-            setNeedsTwoStep(true);
-            setPendingUser(user);
-            return;
-          } catch (error: any) {
-            console.error('Error generating OTP:', error);
-            alert("❌ Failed to generate verification code. Please try again.");
-            return;
-          }
+          setNeedsTwoStep(true);
+          setPendingUser(user);
+          alert("2-Step Verification required. Enter '1234' to continue.");
+          return;
         }
         completeLogin(user);
       } else {
@@ -581,187 +701,11 @@ const App: React.FC = () => {
       }
     } 
     else if (pendingUser) {
-      // 2-Step Verification - Verify OTP from Supabase
-      if (!code || code.length !== 6) {
-        alert("Please enter a 6-digit verification code.");
-        return;
+      if (code === "1234") {
+        completeLogin(pendingUser);
+      } else {
+        alert("Incorrect verification code.");
       }
-      
-      try {
-        const isValid = await otpService.verifyOTP(pendingUser.id, code);
-        
-        if (isValid) {
-          completeLogin(pendingUser);
-        } else {
-          alert("❌ Invalid or expired verification code. Please try again.");
-        }
-      } catch (error: any) {
-        console.error('Error verifying OTP:', error);
-        alert("❌ Failed to verify code. Please try again.");
-      }
-    }
-  };
-
-  // Handle email link verification (called when user clicks link in email)
-  const handleEmailLinkVerification = async () => {
-    // Check if user clicked email verification link
-    // Supabase adds tokens to URL hash: #access_token=xxx&type=signup
-    const hashParams = new URLSearchParams(window.location.hash.substring(1));
-    const accessToken = hashParams.get('access_token');
-    const type = hashParams.get('type');
-    
-    // Also check query params (some email clients may convert hash to query)
-    const queryParams = new URLSearchParams(window.location.search);
-    const queryToken = queryParams.get('access_token');
-    const queryType = queryParams.get('type');
-    
-    const finalToken = accessToken || queryToken;
-    const finalType = type || queryType;
-    
-    if (finalToken && finalType === 'signup') {
-      try {
-        // Get session from Supabase
-        const session = await supabaseAuthService.getSession();
-        
-        if (session && session.user) {
-          // Check if this is for registration or subordinate
-          if (pendingRegistration && pendingRegistration.code === 'supabase-auth') {
-            // Email verified - create user in our custom users table
-            const newUser: Omit<User, 'id'> = {
-              name: pendingRegistration.userData.name || 'Unknown',
-              email: pendingRegistration.userData.email || '',
-              username: pendingRegistration.userData.username || 'user_' + Date.now(),
-              role: pendingRegistration.userData.role || Role.EMPLOYEE,
-              parentId: pendingRegistration.userData.parentId || 'u1',
-              projectId: pendingRegistration.userData.projectId || currentProjectId,
-              isEmailVerified: true,
-              isTwoStepEnabled: pendingRegistration.userData.isTwoStepEnabled || false,
-              password: pendingRegistration.userData.password,
-              employeeId: pendingRegistration.userData.employeeId,
-              department: pendingRegistration.userData.department,
-              subDepartment: pendingRegistration.userData.subDepartment,
-              designation: pendingRegistration.userData.designation,
-              dob: pendingRegistration.userData.dob,
-              contactNo: pendingRegistration.userData.contactNo,
-              profilePhoto: pendingRegistration.userData.profilePhoto,
-              telegramUserId: pendingRegistration.userData.telegramUserId,
-              telegramToken: pendingRegistration.userData.telegramToken
-            };
-            
-            const createdUser = await userService.create(newUser);
-            setUsers(prev => [...prev, createdUser]);
-            setPendingRegistration(null);
-            setPendingEmailVerification(null);
-            
-            // Clear URL hash
-            window.history.replaceState(null, '', window.location.pathname);
-            
-            alert(`✅ Email verified and account created successfully!\n\nWelcome ${createdUser.name}! You can now log in.`);
-          } else if (pendingSubordinateRegistration && pendingSubordinateRegistration.code === 'supabase-auth') {
-            // Email verified - create subordinate in our custom users table
-            const newUser: Omit<User, 'id'> = {
-              name: pendingSubordinateRegistration.userData.name || 'Unknown',
-              email: pendingSubordinateRegistration.userData.email || '',
-              username: pendingSubordinateRegistration.userData.username || 'user_' + Date.now(),
-              role: pendingSubordinateRegistration.userData.role || Role.EMPLOYEE,
-              parentId: pendingSubordinateRegistration.userData.parentId || currentUser?.id || 'u1',
-              projectId: pendingSubordinateRegistration.userData.projectId || currentProjectId,
-              isEmailVerified: true,
-              isTwoStepEnabled: pendingSubordinateRegistration.userData.isTwoStepEnabled || false,
-              password: pendingSubordinateRegistration.userData.password,
-              employeeId: pendingSubordinateRegistration.userData.employeeId,
-              department: pendingSubordinateRegistration.userData.department,
-              subDepartment: pendingSubordinateRegistration.userData.subDepartment,
-              designation: pendingSubordinateRegistration.userData.designation,
-              dob: pendingSubordinateRegistration.userData.dob,
-              contactNo: pendingSubordinateRegistration.userData.contactNo,
-              profilePhoto: pendingSubordinateRegistration.userData.profilePhoto,
-              telegramUserId: pendingSubordinateRegistration.userData.telegramUserId,
-              telegramToken: pendingSubordinateRegistration.userData.telegramToken
-            };
-            
-            const createdUser = await userService.create(newUser);
-            setUsers(prev => [...prev, createdUser]);
-            setPendingSubordinateRegistration(null);
-            setPendingEmailVerification(null);
-            
-            // Clear URL hash
-            window.history.replaceState(null, '', window.location.pathname);
-            
-            alert(`✅ Email verified and personnel account created successfully!\n\n${createdUser.name} Connected Successfully`);
-          }
-        }
-      } catch (error: any) {
-        console.error('Email link verification error:', error);
-        alert("❌ Failed to verify email link. Please try again.");
-      }
-    }
-  };
-
-  // Listen for email link verification on mount
-  useEffect(() => {
-    handleEmailLinkVerification();
-  }, []);
-
-  // Also listen to Supabase auth state changes
-  useEffect(() => {
-    const subscription = supabaseAuthService.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session) {
-        // User signed in via email link - handle verification
-        handleEmailLinkVerification();
-      }
-    });
-
-    return () => {
-      if (subscription && subscription.data) {
-        subscription.data.subscription.unsubscribe();
-      }
-    };
-  }, [pendingRegistration, pendingSubordinateRegistration]);
-
-  // Remove handleVerifyEmail - no longer needed for OTP
-  const handleVerifyEmail = async () => {
-    // This function is no longer used - email verification happens via link click
-    // Keeping for backward compatibility but it won't be called
-  };
-
-  const handleResendVerificationCode = async () => {
-    // Handle registration resend with Supabase Auth
-    if (pendingRegistration && pendingRegistration.code === 'supabase-auth') {
-      try {
-        const email = pendingRegistration.userData.email || '';
-        await supabaseAuthService.resendVerificationEmail(email);
-        alert(`📧 Verification email resent to ${email}\n\nPlease check your email and click the verification link.`);
-      } catch (error: any) {
-        console.error('Resend error:', error);
-        alert("❌ Failed to resend email: " + (error.message || "Please try again."));
-      }
-      return;
-    }
-    
-    // Handle subordinate registration resend with Supabase Auth
-    if (pendingSubordinateRegistration && pendingSubordinateRegistration.code === 'supabase-auth') {
-      try {
-        const email = pendingSubordinateRegistration.userData.email || '';
-        await supabaseAuthService.resendVerificationEmail(email);
-        alert(`📧 Verification email resent to ${email}\n\nPlease check your email and click the verification link.`);
-      } catch (error: any) {
-        console.error('Resend error:', error);
-        alert("❌ Failed to resend email: " + (error.message || "Please try again."));
-      }
-      return;
-    }
-  };
-
-  const handleResendOTP = async () => {
-    if (!pendingUser) return;
-    
-    try {
-      const otpCode = await otpService.generateOTP(pendingUser.id);
-      alert(`🔐 New verification code sent to ${pendingUser.email}\n\nCode: ${otpCode}\n\n(For testing - expires in 5 minutes)`);
-    } catch (error: any) {
-      console.error('Error resending OTP:', error);
-      alert("❌ Failed to resend code. Please try again.");
     }
   };
 
@@ -785,107 +729,85 @@ const App: React.FC = () => {
   const handleUpdateProfile = async (updates: Partial<User>) => {
     if (!currentUser) return;
     try {
-      // Update in Supabase
       const updatedUser = await userService.update(currentUser.id, updates);
-      
-      // Update local state
       setCurrentUser(updatedUser);
       setUsers(prev => prev.map(u => u.id === currentUser.id ? updatedUser : u));
-      localStorage.setItem('srj_current_user', JSON.stringify(updatedUser));
-    } catch (error: any) {
-      console.error('Update profile error:', error);
-      alert("❌ Failed to update profile. Please try again.");
+    } catch (error) {
+      console.error('Failed to update profile:', error);
+      alert('Failed to update profile. Please try again.');
     }
   };
 
   const handleRegister = async (userData: Partial<User>) => {
     if (!currentProjectId) return;
-    
-    // Validate required fields
-    if (!userData.email || !userData.name || !userData.username || !userData.password) {
-      alert("❌ Please fill all required fields.");
-      return;
-    }
-    
     try {
-      // Create user directly in Supabase (email verification is optional)
-      const newUser: Omit<User, 'id'> = {
+      const newUser = await userService.create({
         name: userData.name || 'Unknown',
         email: userData.email || '',
         username: userData.username || 'user_' + Date.now(),
         role: Role.EMPLOYEE,
         parentId: 'u1',
         projectId: currentProjectId,
-        isEmailVerified: false, // Email verification is optional
-        isTwoStepEnabled: userData.isTwoStepEnabled || false,
-        password: userData.password,
-        employeeId: userData.employeeId,
-        department: userData.department,
-        subDepartment: userData.subDepartment,
-        designation: userData.designation,
-        dob: userData.dob,
-        contactNo: userData.contactNo,
-        profilePhoto: userData.profilePhoto,
-        telegramUserId: userData.telegramUserId,
-        telegramToken: userData.telegramToken
-      };
-      
-      // Save to Supabase directly
-      const createdUser = await userService.create(newUser);
-      setUsers(prev => [...prev, createdUser]);
-      
-      alert(`✅ Account created successfully!\n\nWelcome ${createdUser.name}! You can now log in with your username and password.\n\nNote: Email verification is optional. You can verify your email later from your profile settings.`);
-    } catch (error: any) {
-      console.error('Registration error:', error);
-      alert("❌ Failed to create account: " + (error.message || "Please try again."));
+        isEmailVerified: false,
+        isTwoStepEnabled: false,
+        ...userData
+      });
+      setUsers(prev => [...prev, newUser]);
+      alert("Onboarding request submitted. Use your credentials to log in.");
+    } catch (error) {
+      console.error('Failed to register user:', error);
+      alert('Failed to register. Please try again.');
     }
   };
 
-  const handleSendEmail = (data: Omit<Email, 'id' | 'createdAt' | 'read' | 'starred' | 'projectId' | 'senderId' | 'senderEmail'>) => {
+  const handleSendEmail = async (data: Omit<Email, 'id' | 'createdAt' | 'read' | 'starred' | 'projectId' | 'senderId' | 'senderEmail'>) => {
     if (!currentUser || !currentProjectId) return;
-    const newEmail: Email = {
-      id: Date.now().toString(),
-      projectId: currentProjectId,
-      senderId: currentUser.id,
-      senderEmail: currentUser.email,
-      read: false,
-      starred: false,
-      createdAt: new Date().toISOString(),
-      ...data
-    };
-    setEmails(prev => [...prev, newEmail]);
-    
-    // Notify primary recipient
-    const recipient = users.find(u => u.email === data.receiverEmail);
-    if (recipient) {
-      addNotification(recipient.id, "New Internal Mail", `Subject: ${data.subject}`, 'update', 'emails');
-    }
-
-    // Notify CC recipients
-    if (data.cc) {
-      data.cc.forEach(ccEmail => {
-        const ccUser = users.find(u => u.email === ccEmail);
-        if (ccUser) {
-          addNotification(ccUser.id, "CC'd on Internal Mail", `Subject: ${data.subject}`, 'update', 'emails');
-        }
+    try {
+      const newEmail = await emailService.create({
+        projectId: currentProjectId,
+        senderId: currentUser.id,
+        senderEmail: currentUser.email,
+        read: false,
+        starred: false,
+        ...data
       });
-    }
+      setEmails(prev => [...prev, newEmail]);
+      
+      // Notify primary recipient
+      const recipient = users.find(u => u.email === data.receiverEmail);
+      if (recipient) {
+        await addNotification(recipient.id, "New Internal Mail", `Subject: ${data.subject}`, 'update', 'emails');
+      }
 
-    // BCC recipients (quiet notification or none to keep "blind" status is subjective, but usually silent)
-    if (data.bcc) {
-      data.bcc.forEach(bccEmail => {
-        const bccUser = users.find(u => u.email === bccEmail);
-        if (bccUser) {
-           addNotification(bccUser.id, "BCC'd on Internal Mail", `Subject: ${data.subject}`, 'update', 'emails');
+      // Notify CC recipients
+      if (data.cc) {
+        for (const ccEmail of data.cc) {
+          const ccUser = users.find(u => u.email === ccEmail);
+          if (ccUser) {
+            await addNotification(ccUser.id, "CC'd on Internal Mail", `Subject: ${data.subject}`, 'update', 'emails');
+          }
         }
-      });
+      }
+
+      // BCC recipients
+      if (data.bcc) {
+        for (const bccEmail of data.bcc) {
+          const bccUser = users.find(u => u.email === bccEmail);
+          if (bccUser) {
+            await addNotification(bccUser.id, "BCC'd on Internal Mail", `Subject: ${data.subject}`, 'update', 'emails');
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to send email:', error);
+      alert('Failed to send email. Please try again.');
     }
   };
 
   const handleCreatePost = async (data: { text: string; image?: string; video?: string; ratio: '3:4' | '16:9' | '1:1' }) => {
     if (!currentUser || !currentProjectId) return;
     try {
-      const newPost: Omit<Post, 'id' | 'createdAt'> = {
+      await postService.create({
         projectId: currentProjectId,
         userId: currentUser.id,
         userName: currentUser.name,
@@ -898,15 +820,12 @@ const App: React.FC = () => {
         mentions: [],
         hashtags: [],
         comments: []
-      };
-
-      // Save to Supabase directly
-      const createdPost = await postService.create(newPost);
-      setPosts(prev => [createdPost, ...prev]);
+      });
+      // Real-time subscription will update the state automatically
       setView('feed');
-    } catch (error: any) {
-      console.error('Create post error:', error);
-      alert("❌ Failed to create post: " + (error.message || "Please try again."));
+    } catch (error) {
+      console.error('Failed to create post:', error);
+      alert('Failed to create post. Please try again.');
     }
   };
 
@@ -921,15 +840,21 @@ const App: React.FC = () => {
         ? post.likes.filter(id => id !== currentUser.id)
         : [...post.likes, currentUser.id];
       
-      // Update in Supabase
       await postService.update(postId, { likes: newLikes });
-      
-      // Update local state
-      setPosts(prev => prev.map(p => 
-        p.id === postId ? { ...p, likes: newLikes } : p
-      ));
-    } catch (error: any) {
-      console.error('Like post error:', error);
+      // Real-time subscription will update the state automatically
+    } catch (error) {
+      console.error('Failed to like post:', error);
+      // Fallback: update local state
+      setPosts(prev => prev.map(p => {
+        if (p.id === postId) {
+          const alreadyLiked = p.likes.includes(currentUser.id);
+          const newLikes = alreadyLiked 
+            ? p.likes.filter(id => id !== currentUser.id)
+            : [...p.likes, currentUser.id];
+          return { ...p, likes: newLikes };
+        }
+        return p;
+      }));
     }
   };
 
@@ -947,18 +872,21 @@ const App: React.FC = () => {
         createdAt: new Date().toISOString()
       };
       
-      const updatedComments = [...(post.comments || []), newComment];
-      
-      // Update in Supabase
-      await postService.update(postId, { comments: updatedComments });
-      
-      // Update local state
-      setPosts(prev => prev.map(p => 
-        p.id === postId ? { ...p, comments: updatedComments } : p
-      ));
-    } catch (error: any) {
-      console.error('Comment post error:', error);
-      alert("❌ Failed to add comment. Please try again.");
+      await postService.update(postId, { 
+        comments: [...(post.comments || []), newComment] 
+      });
+      // Real-time subscription will update the state automatically
+    } catch (error) {
+      console.error('Failed to add comment:', error);
+      // Fallback: update local state
+      const newComment: Comment = {
+        id: Date.now().toString(),
+        userId: currentUser.id,
+        userName: currentUser.name,
+        text,
+        createdAt: new Date().toISOString()
+      };
+      setPosts(prev => prev.map(p => p.id === postId ? { ...p, comments: [...(p.comments || []), newComment] } : p));
     }
   };
 
@@ -980,51 +908,29 @@ const App: React.FC = () => {
 
   const addSubordinate = async (userData: Partial<User>) => {
     if (!currentUser || !currentProjectId) return;
-    
-    // Validate required fields
-    if (!userData.email || !userData.name || !userData.username || !userData.password) {
-      alert("❌ Please fill all required fields (Name, Email, Username, Password).");
-      return;
-    }
-    
     try {
-      // Create subordinate directly in Supabase (email verification is optional)
-      const newUser: Omit<User, 'id'> = {
-        name: userData.name || 'Unknown',
+      const newUser = await userService.create({
+        name: userData.name || 'New Personnel',
         email: userData.email || '',
         username: userData.username || 'user_' + Date.now(),
         role: userData.role || Role.EMPLOYEE,
         parentId: currentUser.id,
         projectId: currentProjectId,
-        isEmailVerified: false, // Email verification is optional
-        isTwoStepEnabled: userData.isTwoStepEnabled || false,
-        password: userData.password,
-        employeeId: userData.employeeId,
-        department: userData.department,
-        subDepartment: userData.subDepartment,
-        designation: userData.designation,
-        dob: userData.dob,
-        contactNo: userData.contactNo,
-        profilePhoto: userData.profilePhoto,
-        telegramUserId: userData.telegramUserId,
-        telegramToken: userData.telegramToken
-      };
-      
-      // Save to Supabase directly
-      const createdUser = await userService.create(newUser);
-      setUsers(prev => [...prev, createdUser]);
-      
-      alert(`✅ Personnel account created successfully!\n\n${createdUser.name} Connected Successfully\n\nThey can now log in with username and password. Email verification is optional.`);
-    } catch (error: any) {
-      console.error('Add subordinate error:', error);
-      alert("❌ Failed to create personnel: " + (error.message || "Please try again."));
+        isEmailVerified: false,
+        isTwoStepEnabled: false,
+        ...userData
+      });
+      setUsers(prev => [...prev, newUser]);
+    } catch (error) {
+      console.error('Failed to add subordinate:', error);
+      alert('Failed to add subordinate. Please try again.');
     }
   };
 
   const addTask = async (data: any) => {
     if (!currentUser || !currentProjectId) return;
     try {
-      const newTask: Omit<Task, 'id' | 'createdAt'> = {
+      await taskService.create({
         projectId: currentProjectId,
         title: data.title,
         description: data.description,
@@ -1035,34 +941,28 @@ const App: React.FC = () => {
         subTasks: [],
         assignedBy: currentUser.id,
         assignedTo: data.assignedTo || currentUser.id
-      };
-      
-      // Save to Supabase directly
-      const createdTask = await taskService.create(newTask);
-      setTasks(prev => [createdTask, ...prev]);
-    } catch (error: any) {
-      console.error('Add task error:', error);
-      alert("❌ Failed to create task: " + (error.message || "Please try again."));
+      });
+      // Real-time subscription will update the state automatically
+    } catch (error) {
+      console.error('Failed to create task:', error);
+      alert('Failed to create task. Please try again.');
     }
   };
 
   const addNote = async (data: any) => {
     if (!currentProjectId) return;
     try {
-      const newNote: Omit<Note, 'id' | 'createdAt'> = {
+      await noteService.create({
         projectId: currentProjectId,
         title: data.title,
         content: data.content,
         color: data.color
-      };
-      
-      // Save to Supabase
-      const createdNote = await noteService.create(newNote);
-      setNotes(prev => [createdNote, ...prev]);
+      });
+      // Real-time subscription will update the state automatically
       setView('notes');
-    } catch (error: any) {
-      console.error('Add note error:', error);
-      alert("❌ Failed to create note. Please try again.");
+    } catch (error) {
+      console.error('Failed to create note:', error);
+      alert('Failed to create note. Please try again.');
     }
   };
 
@@ -1070,19 +970,173 @@ const App: React.FC = () => {
     try {
       const task = tasks.find(t => t.id === taskId);
       if (!task) return;
-      
-      const updatedCompleted = !task.completed;
-      
-      // Update in Supabase
-      await taskService.update(taskId, { completed: updatedCompleted });
-      
-      // Update local state
-      setTasks(prev => prev.map(t => 
-        t.id === taskId ? { ...t, completed: updatedCompleted } : t
-      ));
-    } catch (error: any) {
-      console.error('Toggle task error:', error);
-      alert("❌ Failed to update task. Please try again.");
+      await taskService.update(taskId, { completed: !task.completed });
+      // Real-time subscription will update the state automatically
+    } catch (error) {
+      console.error('Failed to toggle task:', error);
+      // Fallback: update local state
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, completed: !t.completed } : t));
+    }
+  };
+
+  const handleDeleteNote = async (noteId: string) => {
+    try {
+      await noteService.delete(noteId);
+      // Real-time subscription will update the state automatically
+    } catch (error) {
+      console.error('Failed to delete note:', error);
+      alert('Failed to delete note. Please try again.');
+    }
+  };
+
+  const handleDeleteEmail = async (emailId: string) => {
+    try {
+      await emailService.delete(emailId);
+      // Real-time subscription will update the state automatically
+    } catch (error) {
+      console.error('Failed to delete email:', error);
+      alert('Failed to delete email. Please try again.');
+    }
+  };
+
+  const handleToggleEmailStar = async (emailId: string) => {
+    try {
+      const email = emails.find(e => e.id === emailId);
+      if (!email) return;
+      await emailService.update(emailId, { starred: !email.starred });
+      // Real-time subscription will update the state automatically
+    } catch (error) {
+      console.error('Failed to toggle email star:', error);
+      // Fallback: update local state
+      setEmails(prev => prev.map(e => e.id === emailId ? {...e, starred: !e.starred} : e));
+    }
+  };
+
+  const handleMarkEmailRead = async (emailId: string) => {
+    try {
+      await emailService.update(emailId, { read: true });
+      // Real-time subscription will update the state automatically
+    } catch (error) {
+      console.error('Failed to mark email as read:', error);
+      // Fallback: update local state
+      setEmails(prev => prev.map(e => e.id === emailId ? {...e, read: true} : e));
+    }
+  };
+
+  const handleSubmitComplaint = async (subject: string, message: string, attachment?: ComplaintAttachment) => {
+    if (!currentUser || !currentProjectId) return;
+    try {
+      await complaintService.create({
+        projectId: currentProjectId,
+        userId: currentUser.id,
+        userName: currentUser.name,
+        userRole: currentUser.role,
+        subject,
+        message,
+        status: 'pending',
+        attachment
+      });
+      // Real-time subscription will update the state automatically
+    } catch (error) {
+      console.error('Failed to submit complaint:', error);
+      alert('Failed to submit complaint. Please try again.');
+    }
+  };
+
+  const handleResolveComplaint = async (complaintId: string) => {
+    try {
+      await complaintService.update(complaintId, { status: 'resolved' });
+      // Real-time subscription will update the state automatically
+    } catch (error) {
+      console.error('Failed to resolve complaint:', error);
+      alert('Failed to resolve complaint. Please try again.');
+    }
+  };
+
+  const handleSendMessage = async (receiverId: string | undefined, groupId: string | undefined, text: string, attachment?: MessageAttachment, replyToId?: string) => {
+    if (!currentUser || !currentProjectId) return;
+    try {
+      await messageService.create({
+        projectId: currentProjectId,
+        senderId: currentUser.id,
+        receiverId,
+        groupId,
+        text,
+        attachment,
+        status: 'sent',
+        replyToId
+      });
+      // Real-time subscription will update the state automatically
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      alert('Failed to send message. Please try again.');
+    }
+  };
+
+  const handleDeleteMessage = async (messageId: string) => {
+    try {
+      await messageService.delete(messageId);
+      // Real-time subscription will update the state automatically
+    } catch (error) {
+      console.error('Failed to delete message:', error);
+      alert('Failed to delete message. Please try again.');
+    }
+  };
+
+  const handleCreateGroup = async (name: string, description: string) => {
+    if (!currentUser || !currentProjectId) return;
+    try {
+      await groupService.create({
+        projectId: currentProjectId,
+        name,
+        description,
+        createdBy: currentUser.id,
+        members: [currentUser.id]
+      });
+      // Real-time subscription will update the state automatically
+    } catch (error) {
+      console.error('Failed to create group:', error);
+      alert('Failed to create group. Please try again.');
+    }
+  };
+
+  const handleJoinGroup = async (groupId: string) => {
+    if (!currentUser) return;
+    try {
+      const group = groups.find(g => g.id === groupId);
+      if (!group) return;
+      const updatedMembers = [...group.members, currentUser.id];
+      await groupService.update(groupId, { members: updatedMembers });
+      // Real-time subscription will update the state automatically
+    } catch (error) {
+      console.error('Failed to join group:', error);
+      alert('Failed to join group. Please try again.');
+    }
+  };
+
+  const handleMarkNotificationRead = async (notificationId: string) => {
+    try {
+      await notificationService.update(notificationId, { read: true });
+      // Real-time subscription will update the state automatically
+    } catch (error) {
+      console.error('Failed to mark notification as read:', error);
+      // Fallback: update local state
+      setNotifications(prev => prev.map(n => n.id === notificationId ? { ...n, read: true } : n));
+    }
+  };
+
+  const handleClearAllNotifications = async () => {
+    if (!currentUser) return;
+    try {
+      // Delete all notifications for current user in current project
+      const userNotifs = notifications.filter(n => n.userId === currentUser.id && n.projectId === currentProjectId);
+      for (const notif of userNotifs) {
+        await notificationService.delete(notif.id);
+      }
+      // Real-time subscription will update the state automatically
+    } catch (error) {
+      console.error('Failed to clear notifications:', error);
+      alert('Failed to clear notifications. Please try again.');
     }
   };
 
@@ -1137,7 +1191,7 @@ const App: React.FC = () => {
   const renderContent = () => {
     if (!currentUser && view !== 'profile') {
       return (
-        <div className="flex flex-col items-center justify-center pt-8 pb-20 animate-in fade-in">
+        <div className="flex flex-col items-center justify-center py-20 animate-in fade-in">
            <AuthView 
             currentUser={currentUser} 
             onLogin={handleLogin} 
@@ -1168,65 +1222,23 @@ const App: React.FC = () => {
           onAddSubordinate={addSubordinate}
           onRegister={handleRegister}
           needsTwoStep={needsTwoStep}
-          onNavigateToAdminUsers={() => setView('admin-users')}
-          allUsers={scopedUsers}
-          pendingEmailVerification={pendingEmailVerification || (pendingRegistration ? {
-            user: {
-              id: 'pending',
-              name: pendingRegistration.userData.name || 'Unknown',
-              email: pendingRegistration.userData.email || '',
-              username: pendingRegistration.userData.username || '',
-              role: pendingRegistration.userData.role || Role.EMPLOYEE
-            },
-            code: pendingRegistration.code
-          } : null) || (pendingSubordinateRegistration ? {
-            user: {
-              id: 'pending-subordinate',
-              name: pendingSubordinateRegistration.userData.name || 'Unknown',
-              email: pendingSubordinateRegistration.userData.email || '',
-              username: pendingSubordinateRegistration.userData.username || '',
-              role: pendingSubordinateRegistration.userData.role || Role.EMPLOYEE
-            },
-            code: pendingSubordinateRegistration.code
-          } : null)}
-          onVerifyEmail={handleVerifyEmail}
-          onResendVerificationCode={handleResendVerificationCode}
-          onResendOTP={handleResendOTP}
         />;
-      case 'admin-users':
-        return currentUser && currentUser.role === Role.ADMIN ? (
-          <AdminUsersView 
-            currentUser={currentUser}
-            allUsers={scopedUsers}
-            onDeleteUser={handleDeleteUser}
-            onBack={() => setView('profile')}
-          />
-        ) : (
-          <div className="flex flex-col items-center justify-center py-12 text-slate-300">
-            <ShieldCheck size={48} className="mb-4 opacity-20" />
-            <p className="text-sm font-medium">Access Denied</p>
-            <p className="text-xs text-slate-400 mt-2">Only admins can access this page</p>
-          </div>
-        );
       case 'emails':
         return currentUser ? <EmailsView 
           currentUser={currentUser} 
           emails={scopedEmails} 
           domain={projectDomain}
           onSendEmail={handleSendEmail}
-          onToggleStar={(id) => setEmails(prev => prev.map(e => e.id === id ? {...e, starred: !e.starred} : e))}
-          onDeleteEmail={(id) => setEmails(prev => prev.filter(e => e.id !== id))}
-          onMarkRead={(id) => setEmails(prev => prev.map(e => e.id === id ? {...e, read: true} : e))}
+          onToggleStar={handleToggleEmailStar}
+          onDeleteEmail={handleDeleteEmail}
+          onMarkRead={handleMarkEmailRead}
         /> : null;
       case 'complaints':
         return currentUser ? <ComplaintsView 
           currentUser={currentUser} 
           complaints={filteredComplaints} 
-          onSubmitComplaint={(s, m, a) => {
-            if(!currentProjectId) return;
-            setComplaints(prev => [...prev, { id: Date.now().toString(), projectId: currentProjectId, userId: currentUser.id, userName: currentUser.name, userRole: currentUser.role, subject: s, message: m, status: 'pending', createdAt: new Date().toISOString(), attachment: a }]);
-          }}
-          onResolveComplaint={(id) => setComplaints(prev => prev.map(c => c.id === id ? { ...c, status: 'resolved' } : c))}
+          onSubmitComplaint={handleSubmitComplaint}
+          onResolveComplaint={handleResolveComplaint}
         /> : null;
       case 'chat':
         return currentUser ? <ChatView 
@@ -1234,16 +1246,10 @@ const App: React.FC = () => {
           allUsers={scopedUsers} 
           messages={scopedMessages} 
           groups={scopedGroups}
-          onSendMessage={(rid, gid, text, att, rto) => {
-            if(!currentProjectId) return;
-            setMessages(prev => [...prev, { id: Date.now().toString(), projectId: currentProjectId, senderId: currentUser.id, receiverId: rid, groupId: gid, text, attachment: att, status: 'sent', replyToId: rto, createdAt: new Date().toISOString() }]);
-          }} 
-          onDeleteMessage={(id) => setMessages(prev => prev.filter(m => m.id !== id))}
-          onCreateGroup={(n, d) => {
-            if(!currentProjectId) return;
-            setGroups(prev => [...prev, { id: 'g'+Date.now(), projectId: currentProjectId, name: n, description: d, createdBy: currentUser.id, members: [currentUser.id], createdAt: new Date().toISOString() }]);
-          }}
-          onJoinGroup={(gid) => setGroups(prev => prev.map(g => g.id === gid ? { ...g, members: [...g.members, currentUser.id] } : g))}
+          onSendMessage={handleSendMessage}
+          onDeleteMessage={handleDeleteMessage}
+          onCreateGroup={handleCreateGroup}
+          onJoinGroup={handleJoinGroup}
           onStartCall={() => {}}
           onEndCall={() => {}}
         /> : null;
@@ -1260,8 +1266,8 @@ const App: React.FC = () => {
         return currentUser ? (
           <NotificationsView 
             notifications={userNotifications}
-            onMarkAsRead={(id) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n))}
-            onClearAll={() => setNotifications(prev => prev.filter(n => n.userId !== currentUser.id))}
+            onMarkAsRead={handleMarkNotificationRead}
+            onClearAll={handleClearAllNotifications}
             onNavigate={(v) => setView(v)}
           />
         ) : null;
@@ -1285,7 +1291,7 @@ const App: React.FC = () => {
       case 'notes':
         return (
           <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-bottom-2 duration-500">
-            {scopedNotes.map(note => <NoteCard key={note.id} note={note} onDelete={(id) => setNotes(prev => prev.filter(n => n.id !== id))} />)}
+            {scopedNotes.map(note => <NoteCard key={note.id} note={note} onDelete={handleDeleteNote} />)}
           </div>
         );
       default:
@@ -1327,16 +1333,9 @@ const App: React.FC = () => {
               className="flex items-center gap-2 text-left group"
             >
               <div>
-                <div className="flex items-center gap-2">
-                  <img 
-                    src="/app_logo/SRJ-SOCIAL.jpg" 
-                    alt="SRJ SOCIAL Logo" 
-                    className="w-8 h-8 object-contain rounded-lg"
-                  />
-                  <h1 className="text-xl font-black text-slate-900 flex items-center gap-2 tracking-tighter italic">
-                    SRJ <span className="bg-orange-600 text-[8px] text-white px-2 py-0.5 rounded-full uppercase not-italic tracking-normal">Enterprise</span>
-                  </h1>
-                </div>
+                <h1 className="text-xl font-black text-slate-900 flex items-center gap-2 tracking-tighter italic">
+                  SRJ <span className="bg-orange-600 text-[8px] text-white px-2 py-0.5 rounded-full uppercase not-italic tracking-normal">Enterprise</span>
+                </h1>
                 <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest flex items-center gap-1">
                    {activeProject?.name || 'Loading Node...'} {currentUser?.role === Role.ADMIN && <ChevronDown size={10} className="text-orange-500" />}
                 </p>

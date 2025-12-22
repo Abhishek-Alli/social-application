@@ -5,7 +5,7 @@ import {
   LogIn, ShieldCheck, UserCircle, LogOut, AtSign, Save, 
   UserPlus, Users, ChevronRight, X, Camera, Briefcase, 
   Key, Phone, Mail, Calendar, Hash, Send, Lock, Shield, 
-  QrCode, Info, Fingerprint, ShieldAlert, CheckCircle2, Edit2, Download, Eye, ChevronDown
+  QrCode, Info, Fingerprint, ShieldAlert, CheckCircle2
 } from 'lucide-react';
 
 interface AuthViewProps {
@@ -17,12 +17,6 @@ interface AuthViewProps {
   onAddSubordinate?: (userData: Partial<User>) => void;
   onRegister?: (userData: Partial<User>) => void;
   needsTwoStep?: boolean;
-  onNavigateToAdminUsers?: () => void;
-  allUsers?: User[];
-  pendingEmailVerification?: { user: User; code: string } | null;
-  onVerifyEmail?: (code: string) => void;
-  onResendVerificationCode?: () => void;
-  onResendOTP?: () => void;
 }
 
 export const AuthView: React.FC<AuthViewProps> = ({ 
@@ -33,241 +27,33 @@ export const AuthView: React.FC<AuthViewProps> = ({
   subordinates = [],
   onAddSubordinate,
   onRegister,
-  needsTwoStep = false,
-  onNavigateToAdminUsers,
-  allUsers = [],
-  pendingEmailVerification,
-  onVerifyEmail,
-  onResendVerificationCode,
-  onResendOTP
+  needsTwoStep = false
 }) => {
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
-  const [emailVerificationCode, setEmailVerificationCode] = useState('');
   
   const [isNew, setIsNew] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editUsername, setEditUsername] = useState('');
-  const [isEditingProfile, setIsEditingProfile] = useState(false);
   
   const [isAddingSub, setIsAddingSub] = useState(false);
-  const [showAllUsers, setShowAllUsers] = useState(false);
-  const [hasSubmittedSubordinateForm, setHasSubmittedSubordinateForm] = useState(false);
-  const [hasSubmittedRegistrationForm, setHasSubmittedRegistrationForm] = useState(false);
   const [form, setForm] = useState({
     name: '', email: '', username: '', dob: '', department: '', subDepartment: '',
     designation: '', employeeId: '', contactNo: '', password: '',
     telegramUserId: '', telegramToken: '', profilePhoto: ''
   });
-  
-  const [editForm, setEditForm] = useState({
-    name: '', email: '', department: '', subDepartment: '',
-    designation: '', employeeId: '', contactNo: '', dob: '',
-    profilePhoto: ''
-  });
 
   const photoInputRef = useRef<HTMLInputElement>(null);
-  const identityCardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (currentUser) {
-      setEditUsername(currentUser.username || '');
-      setEditForm({
-        name: currentUser.name || '',
-        email: currentUser.email || '',
-        department: currentUser.department || '',
-        subDepartment: currentUser.subDepartment || '',
-        designation: currentUser.designation || '',
-        employeeId: currentUser.employeeId || '',
-        contactNo: currentUser.contactNo || '',
-        dob: currentUser.dob || '',
-        profilePhoto: currentUser.profilePhoto || ''
-      });
-    }
+    if (currentUser) setEditUsername(currentUser.username || '');
   }, [currentUser]);
 
   const handleUpdate = () => {
     if (onUpdateProfile && editUsername) {
       onUpdateProfile({ username: editUsername.replace('@', '').toLowerCase() });
       setIsEditing(false);
-    }
-  };
-
-  const handleEditProfile = () => {
-    setIsEditingProfile(true);
-  };
-
-  const handleSaveProfile = () => {
-    if (onUpdateProfile) {
-      onUpdateProfile({
-        name: editForm.name,
-        email: editForm.email,
-        department: editForm.department,
-        subDepartment: editForm.subDepartment,
-        designation: editForm.designation,
-        employeeId: editForm.employeeId,
-        contactNo: editForm.contactNo,
-        dob: editForm.dob,
-        profilePhoto: editForm.profilePhoto
-      });
-      setIsEditingProfile(false);
-      alert("Profile updated successfully!");
-    }
-  };
-
-  const handleCancelEdit = () => {
-    if (currentUser) {
-      setEditForm({
-        name: currentUser.name || '',
-        email: currentUser.email || '',
-        department: currentUser.department || '',
-        subDepartment: currentUser.subDepartment || '',
-        designation: currentUser.designation || '',
-        employeeId: currentUser.employeeId || '',
-        contactNo: currentUser.contactNo || '',
-        dob: currentUser.dob || '',
-        profilePhoto: currentUser.profilePhoto || ''
-      });
-    }
-    setIsEditingProfile(false);
-  };
-
-  const handleEditPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => setEditForm(prev => ({ ...prev, profilePhoto: reader.result as string }));
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const handleDownloadPDF = async () => {
-    if (!identityCardRef.current || !currentUser) return;
-    
-    try {
-      // Dynamic import to avoid SSR issues
-      const html2canvas = (await import('html2canvas')).default;
-      const jsPDF = (await import('jspdf')).jsPDF;
-      
-      const cardElement = identityCardRef.current;
-      
-      // Temporarily hide edit buttons and other UI elements that shouldn't be in PDF
-      const originalDisplay: { [key: string]: string } = {};
-      const buttonsToHide = cardElement.parentElement?.querySelectorAll('button');
-      buttonsToHide?.forEach((btn, index) => {
-        const key = `btn_${index}`;
-        originalDisplay[key] = btn.style.display;
-        btn.style.display = 'none';
-      });
-      
-      // Capture the card as canvas with exact styling including borders and shadows
-      const canvas = await html2canvas(cardElement, {
-        scale: 4, // Very high scale for crisp quality
-        backgroundColor: '#ffffff',
-        useCORS: true,
-        logging: false,
-        allowTaint: true,
-        removeContainer: false,
-        imageTimeout: 0,
-        width: cardElement.offsetWidth + 8, // Add extra space for border
-        height: cardElement.offsetHeight + 8, // Add extra space for border
-        x: -4, // Offset to include left border
-        y: -4, // Offset to include top border
-        // Preserve all styles including borders, shadows, rounded corners
-        onclone: (clonedDoc) => {
-          // Find the cloned card element
-          const clonedCard = clonedDoc.querySelector('[class*="aspect-[3/4]"]') as HTMLElement;
-          if (clonedCard) {
-            const computedStyle = getComputedStyle(cardElement);
-            // Ensure all visual styles are preserved exactly as displayed
-            clonedCard.style.transform = 'none';
-            clonedCard.style.position = 'relative';
-            clonedCard.style.boxShadow = computedStyle.boxShadow || '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(249, 115, 22, 0.1)';
-            clonedCard.style.border = computedStyle.border || '4px solid rgb(234, 88, 12)'; // Orange-600 border
-            clonedCard.style.borderRadius = computedStyle.borderRadius || '2rem'; // Round corners (32px)
-            clonedCard.style.overflow = 'visible'; // Show full borders
-            clonedCard.style.backgroundColor = computedStyle.backgroundColor || '#ffffff';
-            clonedCard.style.boxSizing = 'border-box'; // Include border in dimensions
-            // Ensure orange border with round corners is visible
-            if (!computedStyle.border || computedStyle.border === 'none' || computedStyle.border.includes('white')) {
-              clonedCard.style.border = '4px solid rgb(234, 88, 12)'; // Orange-600
-            }
-            // Ensure round corners are preserved
-            if (!computedStyle.borderRadius || computedStyle.borderRadius === '0px') {
-              clonedCard.style.borderRadius = '2rem'; // 32px rounded corners
-            }
-            // Ensure shadow is visible
-            if (!computedStyle.boxShadow || computedStyle.boxShadow === 'none') {
-              clonedCard.style.boxShadow = '0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(249, 115, 22, 0.1)';
-            }
-            
-            // Also update profile photo border to orange with round corners
-            const profilePhoto = clonedCard.querySelector('[class*="rounded-full"]') as HTMLElement;
-            if (profilePhoto) {
-              const originalPhoto = cardElement.querySelector('[class*="rounded-full"]') as HTMLElement;
-              if (originalPhoto) {
-                const photoStyle = getComputedStyle(originalPhoto);
-                profilePhoto.style.border = photoStyle.border || '4px solid rgb(234, 88, 12)'; // Orange border
-                profilePhoto.style.borderRadius = photoStyle.borderRadius || '9999px'; // Fully rounded
-                // Force orange border if white
-                if (!photoStyle.border || photoStyle.border.includes('white')) {
-                  profilePhoto.style.border = '4px solid rgb(234, 88, 12)'; // Orange-600
-                }
-                // Ensure round corners
-                if (!photoStyle.borderRadius || photoStyle.borderRadius === '0px') {
-                  profilePhoto.style.borderRadius = '9999px'; // Fully rounded
-                }
-              }
-            }
-          }
-        }
-      });
-      
-      // Restore button visibility
-      buttonsToHide?.forEach((btn, index) => {
-        const key = `btn_${index}`;
-        btn.style.display = originalDisplay[`btn_${index}`] || '';
-      });
-      
-      const imgData = canvas.toDataURL('image/png', 1.0);
-      
-      // Get actual card dimensions to maintain exact aspect ratio
-      const cardWidth = cardElement.offsetWidth;
-      const cardHeight = cardElement.offsetHeight;
-      const aspectRatio = cardHeight / cardWidth;
-      
-      // Calculate PDF dimensions maintaining exact 3:4 ratio
-      // Add padding to show border properly
-      const padding = 10; // mm padding around card
-      const pdfWidth = 210; // A4 width in mm (standard)
-      const cardPdfWidth = pdfWidth - (padding * 2);
-      const cardPdfHeight = cardPdfWidth * (4 / 3); // Maintain 3:4 portrait ratio
-      const pdfHeight = cardPdfHeight + (padding * 2);
-      
-      // Create PDF with exact dimensions
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: [pdfWidth, pdfHeight]
-      });
-      
-      // Set white background
-      pdf.setFillColor(255, 255, 255);
-      pdf.rect(0, 0, pdfWidth, pdfHeight, 'F');
-      
-      // Add image with padding to show border design properly
-      pdf.addImage(imgData, 'PNG', padding, padding, cardPdfWidth, cardPdfHeight, undefined, 'FAST');
-      
-      // Download PDF with proper filename
-      const sanitizedName = (currentUser.name || 'Identity').replace(/[^a-zA-Z0-9]/g, '_');
-      const fileName = `${sanitizedName}_Identity_Card_${new Date().getTime()}.pdf`;
-      pdf.save(fileName);
-      
-      alert("✅ Identity card downloaded successfully as PDF!");
-    } catch (error: any) {
-      console.error('PDF download error:', error);
-      alert("❌ Failed to download PDF. Please try again.");
     }
   };
 
@@ -319,182 +105,94 @@ export const AuthView: React.FC<AuthViewProps> = ({
     });
   };
 
-  // Close add subordinate form after email verification completes
-  useEffect(() => {
-    // Only close if we've actually submitted the form and verification is complete
-    if (!hasSubmittedSubordinateForm) {
-      // Form was just opened, don't close it
-      return;
-    }
-    
-    // If verification is pending, keep form open
-    if (pendingEmailVerification && pendingEmailVerification.user.id === 'pending-subordinate') {
-      // Form is open and verification is pending - keep it open
-      return;
-    }
-    
-    // If we submitted and verification completed (pendingEmailVerification is null or different user), close form
-    if (hasSubmittedSubordinateForm && (!pendingEmailVerification || pendingEmailVerification.user.id !== 'pending-subordinate')) {
-      // Small delay to show success message
-      const timer = setTimeout(() => {
-        resetForm();
-        setIsAddingSub(false);
-        setHasSubmittedSubordinateForm(false); // Reset flag
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [pendingEmailVerification, isAddingSub, hasSubmittedSubordinateForm]);
-
-  // Close registration form after email verification completes
-  useEffect(() => {
-    // Only close if we've actually submitted the form and verification is complete
-    if (!hasSubmittedRegistrationForm) {
-      // Form was just opened, don't close it
-      return;
-    }
-    
-    // If verification is pending, keep form open (verification screen will show)
-    if (pendingEmailVerification && (pendingEmailVerification.user.id === 'pending' || pendingEmailVerification.user.id === 'pending-subordinate')) {
-      // Form is open and verification is pending - keep it open
-      return;
-    }
-    
-    // If we submitted and verification completed (pendingEmailVerification is null or different user), close form
-    if (hasSubmittedRegistrationForm && (!pendingEmailVerification || (pendingEmailVerification.user.id !== 'pending' && pendingEmailVerification.user.id !== 'pending-subordinate'))) {
-      // Small delay to show success message
-      const timer = setTimeout(() => {
-        resetForm();
-        setIsNew(false);
-        setHasSubmittedRegistrationForm(false); // Reset flag
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [pendingEmailVerification, isNew, hasSubmittedRegistrationForm]);
-
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name || !form.email || !form.username || !targetRole || !onAddSubordinate) return;
-    
-    // Mark that we've submitted the form
-    setHasSubmittedSubordinateForm(true);
-    
-    // Call onAddSubordinate which will trigger email verification
-    // Don't close form or reset yet - wait for email verification
     onAddSubordinate({
       ...form,
       role: targetRole,
       username: form.username.toLowerCase().replace(/\s/g, '_')
     });
-    
-    // Form will close automatically after email verification completes
-    // Don't reset or close here - let email verification flow handle it
+    resetForm();
+    setIsAddingSub(false);
   };
 
   const handleRegisterSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name || !form.email || !form.username || !form.password || !onRegister) return;
-    
-    // Mark that we've submitted the form
-    setHasSubmittedRegistrationForm(true);
-    
     onRegister({
       ...form,
       role: Role.EMPLOYEE,
       username: form.username.toLowerCase().replace(/\s/g, '_')
     });
-    // Don't close form immediately - let email verification screen show
-    // Form will close after email verification completes
+    setIsNew(false);
+    resetForm();
   };
 
   if (currentUser) {
     return (
       <div className="flex flex-col p-6 space-y-8 animate-in fade-in duration-500 pb-32 no-scrollbar">
-        {/* Edit Profile and Download Buttons - Outside Card for Better Visibility */}
-        {!isEditingProfile && (
-          <div className="w-full max-w-[320px] mx-auto flex gap-2">
-            <button
-              onClick={handleEditProfile}
-              className="flex-1 px-4 py-3 bg-orange-600 text-white rounded-xl text-sm font-bold uppercase tracking-widest hover:bg-orange-700 transition-all flex items-center justify-center gap-2 shadow-lg active:scale-95"
-            >
-              <Edit2 size={16} />
-              Edit Profile
-            </button>
-            <button
-              onClick={handleDownloadPDF}
-              className="px-4 py-3 bg-slate-700 text-white rounded-xl text-sm font-bold uppercase tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-2 shadow-lg active:scale-95"
-            >
-              <Download size={16} />
-            </button>
-          </div>
-        )}
-
         {/* Digital Identity Card (3:4 Portrait Ratio) */}
-        <div ref={identityCardRef} className="relative mx-auto w-full max-w-[320px] aspect-[3/4] bg-white rounded-[2rem] shadow-2xl shadow-orange-900/10 border-4 border-orange-600 overflow-visible flex flex-col group transition-all duration-500 hover:shadow-orange-600/20">
+        <div className="relative mx-auto w-full max-w-[320px] aspect-[3/4] bg-white rounded-[2rem] shadow-2xl shadow-orange-900/10 border-4 border-white overflow-hidden flex flex-col group transition-all duration-500 hover:shadow-orange-600/20">
           
-          <div className="flex-1 bg-gradient-to-b from-slate-50 to-white flex flex-col items-center pt-4 px-5 pb-5 text-center justify-between overflow-hidden rounded-[2rem]">
-            <div className="flex flex-col items-center flex-shrink-0 w-full">
-              <div className="relative mb-4 mt-2 flex-shrink-0">
-                <div className="w-24 h-24 rounded-full border-[4px] border-orange-600 shadow-xl overflow-hidden bg-slate-100 flex items-center justify-center">
-                  {(isEditingProfile ? editForm.profilePhoto : currentUser.profilePhoto) ? (
-                    <img src={isEditingProfile ? editForm.profilePhoto : currentUser.profilePhoto} className="w-full h-full object-cover" alt="Identity" />
-                  ) : (
-                    <UserCircle size={56} className="text-slate-300" />
-                  )}
+          <div className="h-24 bg-slate-950 relative overflow-hidden flex items-center justify-between px-6">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-orange-600 rounded-full -mr-16 -mt-16 opacity-20 blur-2xl" />
+            <div className="z-10">
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <div className="bg-orange-600 p-1 rounded-md">
+                   <Shield className="text-white" size={14} fill="currentColor" />
                 </div>
-                {isEditingProfile && (
-                  <button
-                    onClick={() => photoInputRef.current?.click()}
-                    className="absolute bottom-0 right-0 w-7 h-7 bg-orange-600 text-white rounded-full flex items-center justify-center shadow-lg hover:bg-orange-700 transition-all z-10"
-                  >
-                    <Camera size={12} />
-                  </button>
-                )}
-                {!isEditingProfile && (
-                  <div className={`absolute bottom-0 right-0 w-5 h-5 border-3 border-white rounded-full flex items-center justify-center ${currentUser.isEmailVerified ? 'bg-emerald-500' : 'bg-amber-500'}`}>
-                    <Check className="text-white" size={8} />
-                  </div>
-                )}
-                <input
-                  ref={photoInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleEditPhotoUpload}
-                  className="hidden"
-                />
+                <h2 className="text-white font-black italic tracking-tighter text-lg leading-none">SRJ</h2>
               </div>
+              <p className="text-[7px] text-orange-500 font-black uppercase tracking-[0.2em] leading-none">World of Steel</p>
+            </div>
+            <div className="z-10 text-right">
+              <span className="block text-white text-[8px] font-black uppercase tracking-widest opacity-40">Official Identity</span>
+              <span className="block text-orange-600 text-[9px] font-black uppercase tracking-widest leading-none mt-0.5">Enterprise Node</span>
+            </div>
+          </div>
 
-              <h3 className="text-lg font-black text-slate-900 tracking-tight mb-4 flex-shrink-0 break-words px-2 line-clamp-2">
-                {currentUser.name || 'User Name'}
-              </h3>
-              <div className="bg-orange-600/10 px-3 py-1 rounded-full inline-flex items-center justify-center mb-6 flex-shrink-0">
-                 <span className="text-xs font-black text-orange-600 uppercase tracking-widest">
-                   {currentUser.designation || 'Staff'}
-                 </span>
+          <div className="flex-1 bg-gradient-to-b from-slate-50 to-white flex flex-col items-center pt-8 px-6 text-center">
+            <div className="relative mb-4">
+              <div className="w-28 h-28 rounded-full border-[5px] border-white shadow-xl overflow-hidden bg-slate-100 flex items-center justify-center">
+                {currentUser.profilePhoto ? (
+                  <img src={currentUser.profilePhoto} className="w-full h-full object-cover" alt="Identity" />
+                ) : (
+                  <UserCircle size={64} className="text-slate-300" />
+                )}
+              </div>
+              <div className={`absolute bottom-1 right-1 w-6 h-6 border-4 border-white rounded-full flex items-center justify-center ${currentUser.isEmailVerified ? 'bg-emerald-500' : 'bg-amber-500'}`}>
+                 <Check className="text-white" size={10} />
               </div>
             </div>
 
-            <div className="w-full grid grid-cols-2 gap-y-2.5 gap-x-3 text-left border-t border-slate-100 pt-5 pb-2 flex-shrink-0 mt-1">
-              <div className="space-y-0.5 min-h-[35px]">
-                <span className="block text-[7px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Employee ID</span>
-                <span className="block text-[9px] font-bold text-slate-800 uppercase tracking-tight break-all leading-tight">{currentUser.employeeId || 'SRJ-NODE'}</span>
+            <h3 className="text-xl font-black text-slate-900 tracking-tight mb-1">{currentUser.name}</h3>
+            <div className="bg-orange-600/10 px-3 py-1 rounded-full inline-block mb-6">
+               <span className="text-[9px] font-black text-orange-600 uppercase tracking-widest">{currentUser.designation || 'Specialist'}</span>
+            </div>
+
+            <div className="w-full grid grid-cols-2 gap-y-4 gap-x-6 text-left border-t border-slate-100 pt-6">
+              <div className="space-y-0.5">
+                <span className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">Employee ID</span>
+                <span className="block text-[10px] font-bold text-slate-800 uppercase tracking-tight">{currentUser.employeeId || 'SRJ-NODE'}</span>
               </div>
-              <div className="space-y-0.5 min-h-[35px]">
-                <span className="block text-[7px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Department</span>
-                <span className="block text-[9px] font-bold text-slate-800 uppercase tracking-tight break-all leading-tight">{currentUser.department || 'Operations'}</span>
+              <div className="space-y-0.5">
+                <span className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">Department</span>
+                <span className="block text-[10px] font-bold text-slate-800 uppercase tracking-tight truncate">{currentUser.department || 'Operations'}</span>
               </div>
-              <div className="space-y-0.5 min-h-[35px]">
-                <span className="block text-[7px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Verification</span>
-                <span className={`block text-[9px] font-bold uppercase tracking-tight break-words leading-tight ${currentUser.isEmailVerified ? 'text-emerald-600' : 'text-amber-600'}`}>
+              <div className="space-y-0.5">
+                <span className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">Verification</span>
+                <span className={`block text-[10px] font-bold uppercase tracking-tight ${currentUser.isEmailVerified ? 'text-emerald-600' : 'text-amber-600'}`}>
                   {currentUser.isEmailVerified ? 'Verified' : 'Pending'}
                 </span>
               </div>
-              <div className="space-y-0.5 min-h-[35px]">
-                <span className="block text-[7px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Username</span>
-                <span className="block text-[9px] font-bold text-orange-600 uppercase tracking-tight break-all leading-tight">@{currentUser.username}</span>
+              <div className="space-y-0.5">
+                <span className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">Username</span>
+                <span className="block text-[10px] font-bold text-orange-600 uppercase tracking-tight">@{currentUser.username}</span>
               </div>
-              <div className="col-span-2 space-y-0.5 min-h-[35px]">
-                <span className="block text-[7px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Work Email</span>
-                <span className="block text-[9px] font-bold text-slate-800 break-all leading-tight">{currentUser.email}</span>
+              <div className="col-span-2 space-y-0.5">
+                <span className="block text-[8px] font-black text-slate-400 uppercase tracking-widest">Work Email</span>
+                <span className="block text-[10px] font-bold text-slate-800 truncate">{currentUser.email}</span>
               </div>
             </div>
 
@@ -617,135 +315,6 @@ export const AuthView: React.FC<AuthViewProps> = ({
            </div>
         </div>
 
-        {/* Admin User Management Section */}
-        {currentUser && currentUser.role === Role.ADMIN && (
-          <div className="px-2 mb-4 space-y-3">
-            {/* User Management Button */}
-            {onNavigateToAdminUsers && (
-              <button
-                onClick={onNavigateToAdminUsers}
-                className="w-full py-4 px-6 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-2xl border border-orange-400 flex items-center justify-between group hover:from-orange-700 hover:to-orange-600 transition-all shadow-lg shadow-orange-200"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
-                    <ShieldCheck size={20} />
-                  </div>
-                  <div className="text-left">
-                    <h3 className="text-sm font-black uppercase tracking-wider">User Management</h3>
-                    <p className="text-[9px] text-orange-100 font-medium">View & Manage All Accounts</p>
-                  </div>
-                </div>
-                <ChevronRight size={18} className="text-orange-100 group-hover:translate-x-1 transition-transform" />
-              </button>
-            )}
-
-            {/* View All Users Details Toggle */}
-            {allUsers && allUsers.length > 0 && (
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                <button
-                  onClick={() => setShowAllUsers(!showAllUsers)}
-                  className="w-full py-4 px-6 flex items-center justify-between group hover:bg-slate-50 transition-all"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center">
-                      <Eye size={20} className="text-orange-600" />
-                    </div>
-                    <div className="text-left">
-                      <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider">View All Users</h3>
-                      <p className="text-[9px] text-slate-400 font-medium">{allUsers.length} Total Accounts</p>
-                    </div>
-                  </div>
-                  <ChevronDown 
-                    size={18} 
-                    className={`text-slate-400 transition-transform ${showAllUsers ? 'rotate-180' : ''}`} 
-                  />
-                </button>
-
-                {/* All Users Details List */}
-                {showAllUsers && (
-                  <div className="border-t border-slate-100 max-h-[600px] overflow-y-auto">
-                    <div className="p-4 space-y-3">
-                      {allUsers.map((user) => (
-                        <div 
-                          key={user.id} 
-                          className="bg-slate-50 p-4 rounded-xl border border-slate-200 hover:bg-slate-100 transition-all"
-                        >
-                          <div className="flex items-start gap-3">
-                            {/* Avatar */}
-                            <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 font-bold uppercase text-sm flex-shrink-0 overflow-hidden">
-                              {user.profilePhoto ? (
-                                <img 
-                                  src={user.profilePhoto} 
-                                  alt={user.name}
-                                  className="w-full h-full object-cover rounded-full"
-                                />
-                              ) : (
-                                user.name.charAt(0)
-                              )}
-                            </div>
-
-                            {/* User Details */}
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-1">
-                                <h4 className="text-sm font-bold text-slate-800 truncate">{user.name}</h4>
-                                <span className={`px-2 py-0.5 rounded-lg text-[9px] font-bold uppercase ${
-                                  user.role === Role.ADMIN ? 'bg-red-100 text-red-700' :
-                                  user.role === Role.MANAGEMENT ? 'bg-purple-100 text-purple-700' :
-                                  user.role === Role.HOD ? 'bg-blue-100 text-blue-700' :
-                                  'bg-green-100 text-green-700'
-                                }`}>
-                                  {user.role}
-                                </span>
-                              </div>
-                              
-                              <div className="space-y-1">
-                                <p className="text-[10px] text-slate-600 font-medium truncate">
-                                  📧 {user.email}
-                                </p>
-                                {user.username && (
-                                  <p className="text-[10px] text-slate-500 font-medium">
-                                    @{user.username}
-                                  </p>
-                                )}
-                                {user.employeeId && (
-                                  <p className="text-[10px] text-slate-500 font-medium">
-                                    🆔 ID: {user.employeeId}
-                                  </p>
-                                )}
-                                {user.department && (
-                                  <p className="text-[10px] text-slate-500 font-medium">
-                                    🏢 {user.department}
-                                    {user.subDepartment && ` • ${user.subDepartment}`}
-                                  </p>
-                                )}
-                                {user.designation && (
-                                  <p className="text-[10px] text-slate-500 font-medium">
-                                    💼 {user.designation}
-                                  </p>
-                                )}
-                                {user.contactNo && (
-                                  <p className="text-[10px] text-slate-500 font-medium">
-                                    📞 {user.contactNo}
-                                  </p>
-                                )}
-                                {user.dob && (
-                                  <p className="text-[10px] text-slate-500 font-medium">
-                                    🎂 DOB: {new Date(user.dob).toLocaleDateString()}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
         {/* Hierarchy Management Section */}
         {targetRole && (
           <div className="space-y-4">
@@ -754,21 +323,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                 <Users size={16} className="text-orange-600" /> Personnel Boarding
               </h3>
               <button 
-                onClick={(e) => { 
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setIsAddingSub(!isAddingSub); 
-                  if (!isAddingSub) {
-                    resetForm();
-                    setHasSubmittedSubordinateForm(false); // Reset flag when opening
-                  } else {
-                    setHasSubmittedSubordinateForm(false); // Reset flag when closing
-                  }
-                }}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                }}
+                onClick={() => { setIsAddingSub(!isAddingSub); resetForm(); }}
                 className={`p-2 rounded-xl transition-all ${isAddingSub ? 'bg-orange-600 text-white shadow-lg' : 'bg-white text-orange-600 border border-orange-100 shadow-sm'}`}
               >
                 {isAddingSub ? <X size={18} /> : <UserPlus size={18} />}
@@ -776,12 +331,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
             </div>
 
             {isAddingSub && (
-              <form 
-                onSubmit={handleAddSubmit} 
-                onClick={(e) => e.stopPropagation()}
-                onMouseDown={(e) => e.stopPropagation()}
-                className="bg-white p-5 rounded-3xl border-2 border-orange-100 shadow-xl animate-in slide-in-from-top-4 space-y-6"
-              >
+              <form onSubmit={handleAddSubmit} className="bg-white p-5 rounded-3xl border-2 border-orange-100 shadow-xl animate-in slide-in-from-top-4 space-y-6">
                 <div className="text-center">
                   <div 
                     onClick={() => photoInputRef.current?.click()}
@@ -884,77 +434,15 @@ export const AuthView: React.FC<AuthViewProps> = ({
 
   return (
     <div className="flex flex-col h-full p-8 animate-in fade-in duration-500 overflow-y-auto no-scrollbar">
-      <div className="flex-1 flex flex-col justify-start min-h-full pt-32 pb-10">
+      <div className="flex-1 flex flex-col justify-center min-h-full py-10">
         <div className="mb-10 text-center">
-          {/* SRJ SOCIAL Logo - Actual Image */}
-          <div className="w-48 h-48 mx-auto mb-8 flex items-center justify-center">
-            <img 
-              src="/app_logo/SRJ-SOCIAL.jpg" 
-              alt="SRJ SOCIAL Logo" 
-              className="w-full h-full object-contain rounded-2xl"
-              style={{maxWidth: '192px', maxHeight: '192px'}}
-            />
+          <div className="w-20 h-20 bg-orange-600 rounded-3xl flex items-center justify-center text-white mx-auto mb-6 shadow-2xl shadow-orange-200 rotate-3">
+            <ShieldCheck size={40} />
           </div>
         </div>
 
-        {pendingEmailVerification ? (
-          <div className="space-y-6 bg-white p-8 rounded-3xl border-2 border-orange-100 shadow-2xl animate-in zoom-in-95 text-center">
-            <div className="w-16 h-16 bg-orange-50 text-orange-600 rounded-2xl mx-auto flex items-center justify-center mb-4 ring-8 ring-orange-50/50">
-              <Mail size={32} />
-            </div>
-            <div className="space-y-2">
-              <h3 className="text-xl font-black text-slate-900 uppercase">Email Verification Required</h3>
-              <p className="text-xs text-slate-500 font-medium">
-                We've sent a verification link to<br />
-                <span className="font-bold text-orange-600">{pendingEmailVerification.user.email}</span>
-              </p>
-              {(pendingEmailVerification.user.id === 'pending' || pendingEmailVerification.user.id === 'pending-subordinate') && (
-                <p className="text-[10px] text-amber-600 font-medium">
-                  ⚠️ Click the link in your email to verify and create your account
-                </p>
-              )}
-            </div>
-            
-            <div className="bg-orange-50 border-2 border-orange-200 rounded-2xl p-6 space-y-3">
-              <div className="flex items-start gap-3 text-left">
-                <div className="w-8 h-8 bg-orange-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <Mail size={16} className="text-orange-600" />
-                </div>
-                <div className="flex-1">
-                  <h4 className="text-xs font-black text-slate-900 uppercase mb-1">Check Your Email</h4>
-                  <p className="text-[10px] text-slate-600 font-medium leading-relaxed">
-                    1. Open your email inbox (Gmail, Outlook, etc.)<br />
-                    2. Look for an email from Supabase<br />
-                    3. Click the verification link in the email<br />
-                    4. You'll be redirected back to complete registration
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <button 
-              onClick={() => {
-                if (onResendVerificationCode) {
-                  onResendVerificationCode();
-                }
-              }}
-              className="w-full py-4 bg-slate-100 text-slate-700 font-black uppercase tracking-widest rounded-2xl flex items-center justify-center gap-2 hover:bg-slate-200 transition-all active:scale-95"
-            >
-              <Mail size={18} />
-              Resend Verification Email
-            </button>
-            
-            <p className="text-[9px] text-slate-400 font-medium text-center">
-              Didn't receive the email? Check your spam folder or click "Resend Verification Email" above.
-            </p>
-          </div>
-        ) : isNew ? (
-          <form 
-            onSubmit={handleRegisterSubmit} 
-            onClick={(e) => e.stopPropagation()}
-            onMouseDown={(e) => e.stopPropagation()}
-            className="space-y-4 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm animate-in zoom-in-95"
-          >
+        {isNew ? (
+          <form onSubmit={handleRegisterSubmit} className="space-y-4 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm animate-in zoom-in-95">
             <h3 className="text-center text-sm font-black uppercase text-slate-800 mb-2">Request Corporate ID</h3>
             <div className="space-y-3">
               <Input placeholder="Full Name" value={form.name} onChange={(v: string) => setForm({...form, name: v})} required icon={<UserCircle size={16}/>} />
@@ -969,10 +457,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
               </button>
               <button 
                 type="button"
-                onClick={() => {
-                  setIsNew(false);
-                  setHasSubmittedRegistrationForm(false); // Reset flag when closing
-                }}
+                onClick={() => setIsNew(false)}
                 className="w-full text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-orange-600 transition-colors pt-2"
               >
                 Back to Authentication
@@ -985,9 +470,8 @@ export const AuthView: React.FC<AuthViewProps> = ({
                  <ShieldAlert size={32} />
               </div>
               <div className="space-y-2">
-                <h3 className="text-xl font-black text-slate-900 uppercase">2-Step Verification</h3>
-                <p className="text-xs text-slate-500 font-medium">Enter the 6-digit code sent to your email</p>
-                <p className="text-[10px] text-amber-600 font-medium">Code expires in 5 minutes</p>
+                <h3 className="text-xl font-black text-slate-900 uppercase">Verification</h3>
+                <p className="text-xs text-slate-500 font-medium">Enter the 4-digit code sent to your device</p>
               </div>
               
               <div className="relative mt-4">
@@ -997,11 +481,11 @@ export const AuthView: React.FC<AuthViewProps> = ({
                  <input 
                   autoFocus
                   type="text"
-                  maxLength={6}
-                  className="w-full pl-10 pr-4 py-4 bg-slate-50 border-2 border-transparent focus:border-orange-500 rounded-2xl text-center text-xl font-black tracking-[0.5em] transition-all"
-                  placeholder="000000"
+                  maxLength={4}
+                  className="w-full pl-10 pr-4 py-4 bg-slate-50 border-2 border-transparent focus:border-orange-500 rounded-2xl text-center text-2xl font-black tracking-[1em] transition-all"
+                  placeholder="0000"
                   value={verificationCode}
-                  onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ''))}
+                  onChange={(e) => setVerificationCode(e.target.value)}
                 />
               </div>
 
@@ -1013,13 +497,8 @@ export const AuthView: React.FC<AuthViewProps> = ({
               </button>
               
               <button 
-                onClick={() => {
-                  if (onResendOTP) {
-                    onResendOTP();
-                    setVerificationCode('');
-                  }
-                }}
-                className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-orange-600 transition-colors"
+                onClick={() => setVerificationCode('')}
+                className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-orange-600"
               >
                 Resend Code
               </button>
@@ -1064,17 +543,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
             </button>
             
             <button 
-              onClick={(e) => { 
-                e.preventDefault();
-                e.stopPropagation();
-                setIsNew(true); 
-                resetForm();
-                setHasSubmittedRegistrationForm(false); // Reset flag when opening
-              }}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-              }}
+              onClick={() => { setIsNew(true); resetForm(); }}
               className="w-full text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-orange-600 transition-colors pt-4"
             >
               New Personnel? Request Corporate ID

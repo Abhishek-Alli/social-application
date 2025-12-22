@@ -186,22 +186,6 @@ ALTER TABLE messages DISABLE ROW LEVEL SECURITY;
 ALTER TABLE groups DISABLE ROW LEVEL SECURITY;
 ALTER TABLE emails DISABLE ROW LEVEL SECURITY;
 
--- Step 13.5: Create OTP table for 2-step verification
-CREATE TABLE IF NOT EXISTS otp_codes (
-  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  code TEXT NOT NULL,
-  expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
-  used BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_otp_user_id ON otp_codes(user_id);
-CREATE INDEX IF NOT EXISTS idx_otp_code ON otp_codes(code);
-CREATE INDEX IF NOT EXISTS idx_otp_expires_at ON otp_codes(expires_at);
-
-ALTER TABLE otp_codes DISABLE ROW LEVEL SECURITY;
-
 -- Step 14: Insert default project
 INSERT INTO projects (id, name, manager_name, domain, created_at)
 VALUES ('p_default', 'Main Enterprise', 'Admin', 'srj.com', NOW())
@@ -277,7 +261,7 @@ WHERE id = 'p_default';
 -- 3. List all users (to see all created users):
 SELECT id, username, email, role, project_id 
 FROM users 
-ORDER BY created_at;
+ORDER BY id;
 
 -- 4. Count all tables to verify they were created:
 SELECT 
