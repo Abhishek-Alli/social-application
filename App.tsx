@@ -11,7 +11,8 @@ import {
   notificationService, 
   messageService, 
   groupService, 
-  emailService 
+  emailService,
+  otpService
 } from './services/supabaseService';
 import { TaskCard } from './components/TaskCard';
 import { NoteCard } from './components/NoteCard';
@@ -25,6 +26,7 @@ import { ChatView } from './components/ChatView';
 import { FeedView } from './components/FeedView';
 import { ProjectsView } from './components/ProjectsView';
 import { EmailsView } from './components/EmailsView';
+import { AdminUsersView } from './components/AdminUsersView';
 import { 
   Plus, 
   Calendar, 
@@ -87,6 +89,7 @@ const App: React.FC = () => {
   // Login flow state
   const [needsTwoStep, setNeedsTwoStep] = useState(false);
   const [pendingUser, setPendingUser] = useState<User | null>(null);
+  const [pendingEmailVerification, setPendingEmailVerification] = useState<{ user: User; code: string } | null>(null);
 
   // Load ALL data from Supabase on mount (not localStorage)
   useEffect(() => {
@@ -411,8 +414,94 @@ const App: React.FC = () => {
     if (currentProjectId === id) setCurrentProjectId('p_default');
   };
 
+  const handleDeleteUser = async (userId: string) => {
+    if (!currentUser || currentUser.role !== Role.ADMIN) {
+      alert('Only admin can delete users!');
+      return;
+    }
+    
+    if (userId === currentUser.id) {
+      alert('You cannot delete your own account!');
+      return;
+    }
+
+    try {
+      // Delete all related data from Supabase first
+      const userToDelete = users.find(u => u.id === userId);
+      if (!userToDelete) {
+        alert('User not found!');
+        return;
+      }
+
+      // Delete tasks where user is assigned
+      const userTasks = tasks.filter(t => t.assignedTo === userId || t.assignedBy === userId);
+      for (const task of userTasks) {
+        await taskService.delete(task.id);
+      }
+
+      // Delete posts by user
+      const userPosts = posts.filter(p => p.userId === userId);
+      for (const post of userPosts) {
+        await postService.delete(post.id);
+      }
+
+      // Delete complaints by user
+      const userComplaints = complaints.filter(c => c.userId === userId);
+      for (const complaint of userComplaints) {
+        await complaintService.delete(complaint.id);
+      }
+
+      // Delete messages (keep messages but they'll show as "Deleted Account")
+      // Actually, we'll keep messages for history, but mark sender/receiver as deleted
+      const userMessages = messages.filter(m => m.senderId === userId || m.receiverId === userId);
+      // We'll keep messages but they'll show "Deleted Account" in UI
+
+      // Delete notifications for user
+      const userNotifications = notifications.filter(n => n.userId === userId);
+      for (const notification of userNotifications) {
+        await notificationService.delete(notification.id);
+      }
+
+      // Delete emails sent/received by user
+      const userEmails = emails.filter(e => e.senderId === userId || e.receiverEmail === userToDelete.email);
+      for (const email of userEmails) {
+        await emailService.delete(email.id);
+      }
+
+      // Remove user from groups (update groups to remove user from members array)
+      const userGroups = groups.filter(g => g.members.includes(userId));
+      for (const group of userGroups) {
+        const updatedMembers = group.members.filter(m => m !== userId);
+        await groupService.update(group.id, { members: updatedMembers });
+      }
+
+      // Finally, delete the user from Supabase
+      await userService.delete(userId);
+      
+      // Update local state
+      setUsers(prev => prev.filter(u => u.id !== userId));
+      
+      // Update local state for related data (remove deleted items)
+      setTasks(prev => prev.filter(t => t.assignedTo !== userId && t.assignedBy !== userId));
+      setPosts(prev => prev.filter(p => p.userId !== userId));
+      setComplaints(prev => prev.filter(c => c.userId !== userId));
+      // Keep messages but they'll show "Deleted Account"
+      setNotifications(prev => prev.filter(n => n.userId !== userId));
+      setEmails(prev => prev.filter(e => e.senderId !== userId && e.receiverEmail !== userToDelete.email));
+      setGroups(prev => prev.map(g => ({
+        ...g,
+        members: g.members.filter(m => m !== userId)
+      })));
+      
+      alert('User and all related data deleted successfully!');
+    } catch (error: any) {
+      console.error('Error deleting user:', error);
+      alert('Failed to delete user: ' + (error.message || 'Unknown error'));
+    }
+  };
+
   const handleLogin = async (username: string, password?: string, code?: string) => {
-    if (!needsTwoStep) {
+    if (!needsTwoStep && !pendingEmailVerification) {
       // Remove @ symbol if user typed it and trim whitespace
       const cleanUsername = username.replace('@', '').trim().toLowerCase();
       const cleanPassword = password?.trim();
@@ -458,11 +547,30 @@ const App: React.FC = () => {
           return;
         }
         
-        if (user.isTwoStepEnabled) {
-          setNeedsTwoStep(true);
-          setPendingUser(user);
-          alert("2-Step Verification required. Enter '1234' to continue.");
+        // Check email verification (MANDATORY)
+        if (!user.isEmailVerified) {
+          alert("⚠️ Email verification required! Please verify your email before logging in.");
           return;
+        }
+        
+        // Check 2-step verification (OPTIONAL)
+        if (user.isTwoStepEnabled) {
+          try {
+            // Generate OTP and send to user
+            const otpCode = await otpService.generateOTP(user.id);
+            
+            // In production, send OTP via email/SMS
+            // For now, show in alert (remove in production)
+            alert(`🔐 2-Step Verification\n\nA verification code has been sent to ${user.email}\n\nCode: ${otpCode}\n\n(For testing - expires in 5 minutes)`);
+            
+            setNeedsTwoStep(true);
+            setPendingUser(user);
+            return;
+          } catch (error: any) {
+            console.error('Error generating OTP:', error);
+            alert("❌ Failed to generate verification code. Please try again.");
+            return;
+          }
         }
         completeLogin(user);
       } else {
@@ -473,11 +581,74 @@ const App: React.FC = () => {
       }
     } 
     else if (pendingUser) {
-      if (code === "1234") {
-        completeLogin(pendingUser);
-      } else {
-        alert("Incorrect verification code.");
+      // 2-Step Verification - Verify OTP from Supabase
+      if (!code || code.length !== 6) {
+        alert("Please enter a 6-digit verification code.");
+        return;
       }
+      
+      try {
+        const isValid = await otpService.verifyOTP(pendingUser.id, code);
+        
+        if (isValid) {
+          completeLogin(pendingUser);
+        } else {
+          alert("❌ Invalid or expired verification code. Please try again.");
+        }
+      } catch (error: any) {
+        console.error('Error verifying OTP:', error);
+        alert("❌ Failed to verify code. Please try again.");
+      }
+    }
+  };
+
+  const handleVerifyEmail = async (code: string) => {
+    if (!pendingEmailVerification) return;
+    
+    if (code === pendingEmailVerification.code) {
+      try {
+        // Update user in Supabase
+        const updatedUser = await userService.update(pendingEmailVerification.user.id, { 
+          isEmailVerified: true 
+        });
+        
+        // Update local state
+        setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+        setPendingEmailVerification(null);
+        
+        alert("✅ Email verified successfully! You can now log in.");
+      } catch (error: any) {
+        console.error('Email verification error:', error);
+        alert("❌ Failed to verify email: " + (error.message || "Please try again."));
+      }
+    } else {
+      alert("❌ Invalid verification code. Please try again.");
+    }
+  };
+
+  const handleResendVerificationCode = () => {
+    if (!pendingEmailVerification) return;
+    
+    // Generate new code
+    const newCode = Math.floor(100000 + Math.random() * 900000).toString();
+    setPendingEmailVerification({
+      ...pendingEmailVerification,
+      code: newCode
+    });
+    
+    // Simulate sending email
+    alert(`📧 Verification code sent to ${pendingEmailVerification.user.email}\n\nCode: ${newCode}\n\n(For testing purposes)`);
+  };
+
+  const handleResendOTP = async () => {
+    if (!pendingUser) return;
+    
+    try {
+      const otpCode = await otpService.generateOTP(pendingUser.id);
+      alert(`🔐 New verification code sent to ${pendingUser.email}\n\nCode: ${otpCode}\n\n(For testing - expires in 5 minutes)`);
+    } catch (error: any) {
+      console.error('Error resending OTP:', error);
+      alert("❌ Failed to resend code. Please try again.");
     }
   };
 
@@ -517,6 +688,9 @@ const App: React.FC = () => {
   const handleRegister = async (userData: Partial<User>) => {
     if (!currentProjectId) return;
     try {
+      // Generate 6-digit verification code
+      const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+      
       const newUser: Omit<User, 'id'> = {
         name: userData.name || 'Unknown',
         email: userData.email || '',
@@ -524,15 +698,23 @@ const App: React.FC = () => {
         role: Role.EMPLOYEE,
         parentId: 'u1',
         projectId: currentProjectId,
-        isEmailVerified: false,
-        isTwoStepEnabled: false,
+        isEmailVerified: false, // Email verification is MANDATORY
+        isTwoStepEnabled: userData.isTwoStepEnabled || false, // 2-step is OPTIONAL
         ...userData
       };
       
       // Save to Supabase directly
       const createdUser = await userService.create(newUser);
       setUsers(prev => [...prev, createdUser]);
-      alert(`${createdUser.name || createdUser.username} Connected Successfully`);
+      
+      // Set pending email verification
+      setPendingEmailVerification({
+        user: createdUser,
+        code: verificationCode
+      });
+      
+      // Simulate sending email
+      alert(`📧 Verification code sent to ${createdUser.email}\n\nCode: ${verificationCode}\n\n(For testing purposes - Please verify your email to continue)`);
     } catch (error: any) {
       console.error('Registration error:', error);
       alert("❌ Failed to create account: " + (error.message || "Please try again."));
@@ -848,7 +1030,28 @@ const App: React.FC = () => {
           onAddSubordinate={addSubordinate}
           onRegister={handleRegister}
           needsTwoStep={needsTwoStep}
+          onNavigateToAdminUsers={() => setView('admin-users')}
+          allUsers={scopedUsers}
+          pendingEmailVerification={pendingEmailVerification}
+          onVerifyEmail={handleVerifyEmail}
+          onResendVerificationCode={handleResendVerificationCode}
+          onResendOTP={handleResendOTP}
         />;
+      case 'admin-users':
+        return currentUser && currentUser.role === Role.ADMIN ? (
+          <AdminUsersView 
+            currentUser={currentUser}
+            allUsers={scopedUsers}
+            onDeleteUser={handleDeleteUser}
+            onBack={() => setView('profile')}
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center py-12 text-slate-300">
+            <ShieldCheck size={48} className="mb-4 opacity-20" />
+            <p className="text-sm font-medium">Access Denied</p>
+            <p className="text-xs text-slate-400 mt-2">Only admins can access this page</p>
+          </div>
+        );
       case 'emails':
         return currentUser ? <EmailsView 
           currentUser={currentUser} 

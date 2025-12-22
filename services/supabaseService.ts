@@ -699,3 +699,75 @@ export const emailService = {
   }
 };
 
+// OTP (2-Step Verification) Operations
+export const otpService = {
+  // Generate and store OTP code for user
+  async generateOTP(userId: string): Promise<string> {
+    // Generate 6-digit code
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    // Set expiration to 5 minutes from now
+    const expiresAt = new Date();
+    expiresAt.setMinutes(expiresAt.getMinutes() + 5);
+    
+    // Delete any existing unused OTPs for this user
+    await supabase
+      .from('otp_codes')
+      .delete()
+      .eq('user_id', userId)
+      .eq('used', false);
+    
+    // Insert new OTP
+    const { error } = await supabase
+      .from('otp_codes')
+      .insert({
+        user_id: userId,
+        code: code,
+        expires_at: expiresAt.toISOString(),
+        used: false
+      });
+    
+    if (error) throw error;
+    
+    return code;
+  },
+
+  // Verify OTP code
+  async verifyOTP(userId: string, code: string): Promise<boolean> {
+    const { data, error } = await supabase
+      .from('otp_codes')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('code', code)
+      .eq('used', false)
+      .gt('expires_at', new Date().toISOString())
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+    
+    if (error || !data) {
+      return false;
+    }
+    
+    // Mark OTP as used
+    await supabase
+      .from('otp_codes')
+      .update({ used: true })
+      .eq('id', data.id);
+    
+    return true;
+  },
+
+  // Clean up expired OTPs (optional, can be called periodically)
+  async cleanupExpiredOTPs(): Promise<void> {
+    const { error } = await supabase
+      .from('otp_codes')
+      .delete()
+      .or('expires_at.lt.' + new Date().toISOString() + ',used.eq.true');
+    
+    if (error) {
+      console.error('Error cleaning up expired OTPs:', error);
+    }
+  }
+};
+

@@ -189,4 +189,4 @@ export interface Group {
   activeCall?: CallInfo;
 }
 
-export type ViewType = 'tasks' | 'upcoming' | 'notes' | 'analytics' | 'team' | 'profile' | 'complaints' | 'notifications' | 'chat' | 'feed' | 'projects' | 'emails';
+export type ViewType = 'tasks' | 'upcoming' | 'notes' | 'analytics' | 'team' | 'profile' | 'complaints' | 'notifications' | 'chat' | 'feed' | 'projects' | 'emails' | 'admin-users';

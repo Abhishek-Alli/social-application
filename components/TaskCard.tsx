@@ -89,12 +89,12 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, onToggle, onClick, use
               <User size={10} className="text-slate-400" />
               <span className="text-[9px] text-slate-500 font-bold uppercase flex gap-1">
                 {task.assignedBy && (
-                  <span>From: <span className="text-orange-600">{users[task.assignedBy] || 'Admin'}</span></span>
+                  <span>From: <span className="text-orange-600">{users[task.assignedBy] || 'Deleted Account'}</span></span>
                 )}
                 {task.assignedTo && (
                   <>
                     <span className="text-slate-300 mx-1">|</span>
-                    <span>To: <span className="text-slate-900">{users[task.assignedTo] || 'User'}</span></span>
+                    <span>To: <span className="text-slate-900">{users[task.assignedTo] || 'Deleted Account'}</span></span>
                   </>
                 )}
               </span>

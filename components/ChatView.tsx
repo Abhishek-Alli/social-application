@@ -147,6 +147,10 @@ export const ChatView: React.FC<ChatViewProps> = ({
     return map;
   }, [allUsers]);
 
+  const getUserName = (userId: string): string => {
+    return userMap[userId] || 'Deleted Account';
+  };
+
   const usernameMap = useMemo(() => {
     const map: { [key: string]: string } = {};
     allUsers.forEach(u => map[u.username] = u.id);
@@ -222,9 +226,10 @@ export const ChatView: React.FC<ChatViewProps> = ({
   }
 
   if (activeChatUser || activeGroup) {
-    const title = activeChatUser ? activeChatUser.name : activeGroup?.name;
-    const subtitle = activeChatUser ? `@${activeChatUser.username}` : `${activeGroup?.members.length} members`;
-    const initial = activeChatUser ? activeChatUser.name.charAt(0) : '#';
+    const isDeletedUser = activeChatUser && !allUsers.find(u => u.id === activeChatUser.id);
+    const title = activeChatUser ? (isDeletedUser ? 'Deleted Account' : activeChatUser.name) : activeGroup?.name;
+    const subtitle = activeChatUser ? (isDeletedUser ? 'Account has been deleted' : `@${activeChatUser.username}`) : `${activeGroup?.members.length} members`;
+    const initial = activeChatUser ? (isDeletedUser ? '?' : activeChatUser.name.charAt(0)) : '#';
 
     return (
       <div className="flex flex-col h-full animate-in slide-in-from-right duration-300">
@@ -262,7 +267,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
               <div key={msg.id} className={`flex flex-col group ${isMe ? 'items-end' : 'items-start'}`}>
                 {activeGroup && !isMe && (
                   <span className="text-[8px] font-bold text-slate-400 ml-1 mb-1 uppercase">
-                    {userMap[msg.senderId] || 'User'}
+                    {getUserName(msg.senderId)}
                   </span>
                 )}
                 <div className={`relative max-w-[85%] p-3 rounded-2xl text-xs font-medium shadow-sm transition-all group-hover:pr-14 ${
@@ -272,7 +277,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 }`}>
                   {repliedMessage && (
                     <div className={`mb-2 p-2 rounded-lg border-l-4 text-[10px] ${isMe ? 'bg-black/10 border-white/40' : 'bg-slate-50 border-orange-500'} italic truncate`}>
-                      <span className="font-bold block not-italic mb-1 opacity-70">Replying to {userMap[repliedMessage.senderId] || 'User'}</span>
+                      <span className="font-bold block not-italic mb-1 opacity-70">Replying to {getUserName(repliedMessage.senderId)}</span>
                       {repliedMessage.text}
                     </div>
                   )}
@@ -322,7 +327,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
           <div className="p-3 bg-white border border-slate-100 rounded-t-2xl flex items-center justify-between mb-1 animate-in slide-in-from-bottom-2">
             <div className="flex items-center gap-3 border-l-4 border-orange-500 pl-3 overflow-hidden">
                <div className="flex-1 truncate">
-                 <p className="text-[10px] font-bold text-orange-600 uppercase">Replying to {userMap[replyingTo.senderId]}</p>
+                 <p className="text-[10px] font-bold text-orange-600 uppercase">Replying to {getUserName(replyingTo.senderId)}</p>
                  <p className="text-[11px] text-slate-500 truncate">{replyingTo.text || (replyingTo.attachment ? 'Attachment' : 'Message')}</p>
                </div>
             </div>

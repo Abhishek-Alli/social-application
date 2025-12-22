@@ -5,7 +5,7 @@ import {
   LogIn, ShieldCheck, UserCircle, LogOut, AtSign, Save, 
   UserPlus, Users, ChevronRight, X, Camera, Briefcase, 
   Key, Phone, Mail, Calendar, Hash, Send, Lock, Shield, 
-  QrCode, Info, Fingerprint, ShieldAlert, CheckCircle2, Edit2, Download
+  QrCode, Info, Fingerprint, ShieldAlert, CheckCircle2, Edit2, Download, Eye, ChevronDown
 } from 'lucide-react';
 
 interface AuthViewProps {
@@ -17,6 +17,12 @@ interface AuthViewProps {
   onAddSubordinate?: (userData: Partial<User>) => void;
   onRegister?: (userData: Partial<User>) => void;
   needsTwoStep?: boolean;
+  onNavigateToAdminUsers?: () => void;
+  allUsers?: User[];
+  pendingEmailVerification?: { user: User; code: string } | null;
+  onVerifyEmail?: (code: string) => void;
+  onResendVerificationCode?: () => void;
+  onResendOTP?: () => void;
 }
 
 export const AuthView: React.FC<AuthViewProps> = ({ 
@@ -27,11 +33,18 @@ export const AuthView: React.FC<AuthViewProps> = ({
   subordinates = [],
   onAddSubordinate,
   onRegister,
-  needsTwoStep = false
+  needsTwoStep = false,
+  onNavigateToAdminUsers,
+  allUsers = [],
+  pendingEmailVerification,
+  onVerifyEmail,
+  onResendVerificationCode,
+  onResendOTP
 }) => {
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
+  const [emailVerificationCode, setEmailVerificationCode] = useState('');
   
   const [isNew, setIsNew] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -39,6 +52,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   
   const [isAddingSub, setIsAddingSub] = useState(false);
+  const [showAllUsers, setShowAllUsers] = useState(false);
   const [form, setForm] = useState({
     name: '', email: '', username: '', dob: '', department: '', subDepartment: '',
     designation: '', employeeId: '', contactNo: '', password: '',
@@ -538,6 +552,135 @@ export const AuthView: React.FC<AuthViewProps> = ({
            </div>
         </div>
 
+        {/* Admin User Management Section */}
+        {currentUser && currentUser.role === Role.ADMIN && (
+          <div className="px-2 mb-4 space-y-3">
+            {/* User Management Button */}
+            {onNavigateToAdminUsers && (
+              <button
+                onClick={onNavigateToAdminUsers}
+                className="w-full py-4 px-6 bg-gradient-to-r from-orange-600 to-orange-500 text-white rounded-2xl border border-orange-400 flex items-center justify-between group hover:from-orange-700 hover:to-orange-600 transition-all shadow-lg shadow-orange-200"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+                    <ShieldCheck size={20} />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="text-sm font-black uppercase tracking-wider">User Management</h3>
+                    <p className="text-[9px] text-orange-100 font-medium">View & Manage All Accounts</p>
+                  </div>
+                </div>
+                <ChevronRight size={18} className="text-orange-100 group-hover:translate-x-1 transition-transform" />
+              </button>
+            )}
+
+            {/* View All Users Details Toggle */}
+            {allUsers && allUsers.length > 0 && (
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <button
+                  onClick={() => setShowAllUsers(!showAllUsers)}
+                  className="w-full py-4 px-6 flex items-center justify-between group hover:bg-slate-50 transition-all"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center">
+                      <Eye size={20} className="text-orange-600" />
+                    </div>
+                    <div className="text-left">
+                      <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider">View All Users</h3>
+                      <p className="text-[9px] text-slate-400 font-medium">{allUsers.length} Total Accounts</p>
+                    </div>
+                  </div>
+                  <ChevronDown 
+                    size={18} 
+                    className={`text-slate-400 transition-transform ${showAllUsers ? 'rotate-180' : ''}`} 
+                  />
+                </button>
+
+                {/* All Users Details List */}
+                {showAllUsers && (
+                  <div className="border-t border-slate-100 max-h-[600px] overflow-y-auto">
+                    <div className="p-4 space-y-3">
+                      {allUsers.map((user) => (
+                        <div 
+                          key={user.id} 
+                          className="bg-slate-50 p-4 rounded-xl border border-slate-200 hover:bg-slate-100 transition-all"
+                        >
+                          <div className="flex items-start gap-3">
+                            {/* Avatar */}
+                            <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center text-orange-600 font-bold uppercase text-sm flex-shrink-0 overflow-hidden">
+                              {user.profilePhoto ? (
+                                <img 
+                                  src={user.profilePhoto} 
+                                  alt={user.name}
+                                  className="w-full h-full object-cover rounded-full"
+                                />
+                              ) : (
+                                user.name.charAt(0)
+                              )}
+                            </div>
+
+                            {/* User Details */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <h4 className="text-sm font-bold text-slate-800 truncate">{user.name}</h4>
+                                <span className={`px-2 py-0.5 rounded-lg text-[9px] font-bold uppercase ${
+                                  user.role === Role.ADMIN ? 'bg-red-100 text-red-700' :
+                                  user.role === Role.MANAGEMENT ? 'bg-purple-100 text-purple-700' :
+                                  user.role === Role.HOD ? 'bg-blue-100 text-blue-700' :
+                                  'bg-green-100 text-green-700'
+                                }`}>
+                                  {user.role}
+                                </span>
+                              </div>
+                              
+                              <div className="space-y-1">
+                                <p className="text-[10px] text-slate-600 font-medium truncate">
+                                  📧 {user.email}
+                                </p>
+                                {user.username && (
+                                  <p className="text-[10px] text-slate-500 font-medium">
+                                    @{user.username}
+                                  </p>
+                                )}
+                                {user.employeeId && (
+                                  <p className="text-[10px] text-slate-500 font-medium">
+                                    🆔 ID: {user.employeeId}
+                                  </p>
+                                )}
+                                {user.department && (
+                                  <p className="text-[10px] text-slate-500 font-medium">
+                                    🏢 {user.department}
+                                    {user.subDepartment && ` • ${user.subDepartment}`}
+                                  </p>
+                                )}
+                                {user.designation && (
+                                  <p className="text-[10px] text-slate-500 font-medium">
+                                    💼 {user.designation}
+                                  </p>
+                                )}
+                                {user.contactNo && (
+                                  <p className="text-[10px] text-slate-500 font-medium">
+                                    📞 {user.contactNo}
+                                  </p>
+                                )}
+                                {user.dob && (
+                                  <p className="text-[10px] text-slate-500 font-medium">
+                                    🎂 DOB: {new Date(user.dob).toLocaleDateString()}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Hierarchy Management Section */}
         {targetRole && (
           <div className="space-y-4">
@@ -670,7 +813,67 @@ export const AuthView: React.FC<AuthViewProps> = ({
           </div>
         </div>
 
-        {isNew ? (
+        {pendingEmailVerification ? (
+          <div className="space-y-6 bg-white p-8 rounded-3xl border-2 border-orange-100 shadow-2xl animate-in zoom-in-95 text-center">
+            <div className="w-16 h-16 bg-orange-50 text-orange-600 rounded-2xl mx-auto flex items-center justify-center mb-4 ring-8 ring-orange-50/50">
+              <Mail size={32} />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-xl font-black text-slate-900 uppercase">Email Verification Required</h3>
+              <p className="text-xs text-slate-500 font-medium">
+                We've sent a verification code to<br />
+                <span className="font-bold text-orange-600">{pendingEmailVerification.user.email}</span>
+              </p>
+            </div>
+            
+            <div className="relative mt-4">
+              <div className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400 pointer-events-none">
+                <Key size={16} />
+              </div>
+              <input 
+                autoFocus
+                type="text"
+                maxLength={6}
+                className="w-full pl-10 pr-4 py-4 bg-slate-50 border-2 border-transparent focus:border-orange-500 rounded-2xl text-center text-xl font-black tracking-[0.5em] transition-all"
+                placeholder="000000"
+                value={emailVerificationCode}
+                onChange={(e) => setEmailVerificationCode(e.target.value.replace(/\D/g, ''))}
+              />
+            </div>
+
+            <button 
+              onClick={() => {
+                if (emailVerificationCode.length === 6 && onVerifyEmail) {
+                  onVerifyEmail(emailVerificationCode);
+                  setEmailVerificationCode('');
+                } else {
+                  alert('Please enter a 6-digit verification code');
+                }
+              }}
+              className="w-full py-5 bg-orange-600 text-white font-black uppercase tracking-widest rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-orange-100 active:scale-95 transition-all"
+            >
+              Verify Email
+            </button>
+            
+            <button 
+              onClick={() => {
+                if (onResendVerificationCode) {
+                  onResendVerificationCode();
+                  setEmailVerificationCode('');
+                }
+              }}
+              className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-orange-600 transition-colors"
+            >
+              Resend Code
+            </button>
+            
+            <div className="pt-4 border-t border-slate-100">
+              <p className="text-[9px] text-slate-400 font-medium">
+                For testing: Code is <span className="font-bold text-orange-600">{pendingEmailVerification.code}</span>
+              </p>
+            </div>
+          </div>
+        ) : isNew ? (
           <form onSubmit={handleRegisterSubmit} className="space-y-4 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm animate-in zoom-in-95">
             <h3 className="text-center text-sm font-black uppercase text-slate-800 mb-2">Request Corporate ID</h3>
             <div className="space-y-3">
@@ -699,8 +902,9 @@ export const AuthView: React.FC<AuthViewProps> = ({
                  <ShieldAlert size={32} />
               </div>
               <div className="space-y-2">
-                <h3 className="text-xl font-black text-slate-900 uppercase">Verification</h3>
-                <p className="text-xs text-slate-500 font-medium">Enter the 4-digit code sent to your device</p>
+                <h3 className="text-xl font-black text-slate-900 uppercase">2-Step Verification</h3>
+                <p className="text-xs text-slate-500 font-medium">Enter the 6-digit code sent to your email</p>
+                <p className="text-[10px] text-amber-600 font-medium">Code expires in 5 minutes</p>
               </div>
               
               <div className="relative mt-4">
@@ -710,11 +914,11 @@ export const AuthView: React.FC<AuthViewProps> = ({
                  <input 
                   autoFocus
                   type="text"
-                  maxLength={4}
-                  className="w-full pl-10 pr-4 py-4 bg-slate-50 border-2 border-transparent focus:border-orange-500 rounded-2xl text-center text-2xl font-black tracking-[1em] transition-all"
-                  placeholder="0000"
+                  maxLength={6}
+                  className="w-full pl-10 pr-4 py-4 bg-slate-50 border-2 border-transparent focus:border-orange-500 rounded-2xl text-center text-xl font-black tracking-[0.5em] transition-all"
+                  placeholder="000000"
                   value={verificationCode}
-                  onChange={(e) => setVerificationCode(e.target.value)}
+                  onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, ''))}
                 />
               </div>
 
@@ -726,8 +930,13 @@ export const AuthView: React.FC<AuthViewProps> = ({
               </button>
               
               <button 
-                onClick={() => setVerificationCode('')}
-                className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-orange-600"
+                onClick={() => {
+                  if (onResendOTP) {
+                    onResendOTP();
+                    setVerificationCode('');
+                  }
+                }}
+                className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-orange-600 transition-colors"
               >
                 Resend Code
               </button>
