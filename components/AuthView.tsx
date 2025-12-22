@@ -463,12 +463,12 @@ export const AuthView: React.FC<AuthViewProps> = ({
                 />
               </div>
 
-              <h3 className="text-base font-black text-slate-900 tracking-tight mb-5 flex-shrink-0 break-words px-2 line-clamp-1">
-                {currentUser.name ? currentUser.name.charAt(0).toLowerCase() : 'U'}
+              <h3 className="text-lg font-black text-slate-900 tracking-tight mb-4 flex-shrink-0 break-words px-2 line-clamp-2">
+                {currentUser.name || 'User Name'}
               </h3>
               <div className="bg-orange-600/10 px-3 py-1 rounded-full inline-flex items-center justify-center mb-6 flex-shrink-0">
                  <span className="text-xs font-black text-orange-600 uppercase tracking-widest">
-                   {currentUser.designation ? currentUser.designation.charAt(0).toUpperCase() : 'S'}
+                   {currentUser.designation || 'Staff'}
                  </span>
               </div>
             </div>
