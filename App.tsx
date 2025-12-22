@@ -550,11 +550,8 @@ const App: React.FC = () => {
           return;
         }
         
-        // Check email verification (MANDATORY)
-        if (!user.isEmailVerified) {
-          alert("⚠️ Email verification required! Please verify your email before logging in.");
-          return;
-        }
+        // Email verification is OPTIONAL - users can login without verifying email
+        // (Email verification can be done later from profile settings)
         
         // Check 2-step verification (OPTIONAL)
         if (user.isTwoStepEnabled) {
@@ -811,61 +808,36 @@ const App: React.FC = () => {
     }
     
     try {
-      // Use Supabase Auth to send email verification link
-      try {
-        await supabaseAuthService.signUp(
-          userData.email || '',
-          userData.password || '',
-          {
-            name: userData.name || 'Unknown',
-            username: userData.username || 'user_' + Date.now()
-          }
-        );
-      } catch (error: any) {
-        throw error;
-      }
+      // Create user directly in Supabase (email verification is optional)
+      const newUser: Omit<User, 'id'> = {
+        name: userData.name || 'Unknown',
+        email: userData.email || '',
+        username: userData.username || 'user_' + Date.now(),
+        role: Role.EMPLOYEE,
+        parentId: 'u1',
+        projectId: currentProjectId,
+        isEmailVerified: false, // Email verification is optional
+        isTwoStepEnabled: userData.isTwoStepEnabled || false,
+        password: userData.password,
+        employeeId: userData.employeeId,
+        department: userData.department,
+        subDepartment: userData.subDepartment,
+        designation: userData.designation,
+        dob: userData.dob,
+        contactNo: userData.contactNo,
+        profilePhoto: userData.profilePhoto,
+        telegramUserId: userData.telegramUserId,
+        telegramToken: userData.telegramToken
+      };
       
-      // Store registration data temporarily (NOT saved to Supabase users table yet)
-      setPendingRegistration({
-        userData: {
-          name: userData.name || 'Unknown',
-          email: userData.email || '',
-          username: userData.username || 'user_' + Date.now(),
-          role: Role.EMPLOYEE,
-          parentId: 'u1',
-          projectId: currentProjectId,
-          isEmailVerified: false, // Will be set to true after verification
-          isTwoStepEnabled: userData.isTwoStepEnabled || false,
-          password: userData.password,
-          employeeId: userData.employeeId,
-          department: userData.department,
-          subDepartment: userData.subDepartment,
-          designation: userData.designation,
-          dob: userData.dob,
-          contactNo: userData.contactNo,
-          profilePhoto: userData.profilePhoto,
-          telegramUserId: userData.telegramUserId,
-          telegramToken: userData.telegramToken
-        },
-        code: 'supabase-auth' // Mark as Supabase Auth email link
-      });
+      // Save to Supabase directly
+      const createdUser = await userService.create(newUser);
+      setUsers(prev => [...prev, createdUser]);
       
-      // Set pending email verification for UI
-      setPendingEmailVerification({
-        user: {
-          id: 'pending',
-          name: userData.name || 'Unknown',
-          email: userData.email || '',
-          username: userData.username || '',
-          role: Role.EMPLOYEE
-        },
-        code: 'supabase-auth'
-      });
-      
-      alert(`📧 Verification email sent to ${userData.email}\n\nPlease check your email and click the verification link to complete registration.`);
+      alert(`✅ Account created successfully!\n\nWelcome ${createdUser.name}! You can now log in with your username and password.\n\nNote: Email verification is optional. You can verify your email later from your profile settings.`);
     } catch (error: any) {
       console.error('Registration error:', error);
-      alert("❌ Failed to send verification email: " + (error.message || "Please try again."));
+      alert("❌ Failed to create account: " + (error.message || "Please try again."));
     }
   };
 
@@ -1016,61 +988,36 @@ const App: React.FC = () => {
     }
     
     try {
-      // Use Supabase Auth to send email verification link
-      try {
-        await supabaseAuthService.signUp(
-          userData.email || '',
-          userData.password || '',
-          {
-            name: userData.name || 'Unknown',
-            username: userData.username || 'user_' + Date.now()
-          }
-        );
-      } catch (error: any) {
-        throw error;
-      }
+      // Create subordinate directly in Supabase (email verification is optional)
+      const newUser: Omit<User, 'id'> = {
+        name: userData.name || 'Unknown',
+        email: userData.email || '',
+        username: userData.username || 'user_' + Date.now(),
+        role: userData.role || Role.EMPLOYEE,
+        parentId: currentUser.id,
+        projectId: currentProjectId,
+        isEmailVerified: false, // Email verification is optional
+        isTwoStepEnabled: userData.isTwoStepEnabled || false,
+        password: userData.password,
+        employeeId: userData.employeeId,
+        department: userData.department,
+        subDepartment: userData.subDepartment,
+        designation: userData.designation,
+        dob: userData.dob,
+        contactNo: userData.contactNo,
+        profilePhoto: userData.profilePhoto,
+        telegramUserId: userData.telegramUserId,
+        telegramToken: userData.telegramToken
+      };
       
-      // Store subordinate registration data temporarily (NOT saved to Supabase users table yet)
-      setPendingSubordinateRegistration({
-        userData: {
-          name: userData.name || 'Unknown',
-          email: userData.email || '',
-          username: userData.username || 'user_' + Date.now(),
-          role: userData.role || Role.EMPLOYEE,
-          parentId: currentUser.id,
-          projectId: currentProjectId,
-          isEmailVerified: false, // Will be set to true after verification
-          isTwoStepEnabled: userData.isTwoStepEnabled || false,
-          password: userData.password,
-          employeeId: userData.employeeId,
-          department: userData.department,
-          subDepartment: userData.subDepartment,
-          designation: userData.designation,
-          dob: userData.dob,
-          contactNo: userData.contactNo,
-          profilePhoto: userData.profilePhoto,
-          telegramUserId: userData.telegramUserId,
-          telegramToken: userData.telegramToken
-        },
-        code: 'supabase-auth' // Mark as Supabase Auth email link
-      });
+      // Save to Supabase directly
+      const createdUser = await userService.create(newUser);
+      setUsers(prev => [...prev, createdUser]);
       
-      // Set pending email verification for UI
-      setPendingEmailVerification({
-        user: {
-          id: 'pending-subordinate',
-          name: userData.name || 'Unknown',
-          email: userData.email || '',
-          username: userData.username || '',
-          role: userData.role || Role.EMPLOYEE
-        },
-        code: 'supabase-auth'
-      });
-      
-      alert(`📧 Verification email sent to ${userData.email}\n\nPlease check your email and click the verification link to complete personnel creation.`);
+      alert(`✅ Personnel account created successfully!\n\n${createdUser.name} Connected Successfully\n\nThey can now log in with username and password. Email verification is optional.`);
     } catch (error: any) {
       console.error('Add subordinate error:', error);
-      alert("❌ Failed to send verification email: " + (error.message || "Please try again."));
+      alert("❌ Failed to create personnel: " + (error.message || "Please try again."));
     }
   };
 
