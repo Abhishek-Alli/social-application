@@ -5,12 +5,14 @@ import {
   LogIn, ShieldCheck, UserCircle, LogOut, AtSign, Save, 
   UserPlus, Users, ChevronRight, X, Camera, Briefcase, 
   Key, Phone, Mail, Calendar, Hash, Send, Lock, Shield, 
-  QrCode, Info, Fingerprint, ShieldAlert, CheckCircle2, Megaphone
+  QrCode, Info, Fingerprint, ShieldAlert, CheckCircle2, Megaphone, Download, Edit
 } from 'lucide-react';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
 
 interface AuthViewProps {
   currentUser: User | null;
-  onLogin: (username: string, password?: string, code?: string) => void;
+  onLogin: (username: string, password?: string, code?: string, rememberMe?: boolean) => void;
   onLogout: () => void;
   onUpdateProfile?: (updates: Partial<User>) => void;
   subordinates?: User[];
@@ -36,12 +38,19 @@ export const AuthView: React.FC<AuthViewProps> = ({
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
   
   const [isNew, setIsNew] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editUsername, setEditUsername] = useState('');
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   
   const [isAddingSub, setIsAddingSub] = useState(false);
+  const [editForm, setEditForm] = useState({
+    name: '', email: '', username: '', dob: '', department: '', subDepartment: '',
+    designation: '', employeeId: '', contactNo: '', profilePhoto: ''
+  });
   const [form, setForm] = useState({
     name: '', email: '', username: '', dob: '', department: '', subDepartment: '',
     designation: '', employeeId: '', contactNo: '', password: '',
@@ -49,9 +58,38 @@ export const AuthView: React.FC<AuthViewProps> = ({
   });
 
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const editPhotoInputRef = useRef<HTMLInputElement>(null);
+  const identityCardRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (currentUser) setEditUsername(currentUser.username || '');
+    if (currentUser) {
+      setEditUsername(currentUser.username || '');
+      setEditForm({
+        name: currentUser.name || '',
+        email: currentUser.email || '',
+        username: currentUser.username || '',
+        dob: currentUser.dob || '',
+        department: currentUser.department || '',
+        subDepartment: currentUser.subDepartment || '',
+        designation: currentUser.designation || '',
+        employeeId: currentUser.employeeId || '',
+        contactNo: currentUser.contactNo || '',
+        profilePhoto: currentUser.profilePhoto || ''
+      });
+    } else {
+      // Load saved credentials if user is not logged in
+      const savedCredentials = localStorage.getItem('srj_saved_credentials');
+      if (savedCredentials) {
+        try {
+          const creds = JSON.parse(savedCredentials);
+          setLoginUsername(creds.username || '');
+          setLoginPassword(creds.password || '');
+          setRememberMe(true);
+        } catch (error) {
+          console.error('Failed to load saved credentials:', error);
+        }
+      }
+    }
   }, [currentUser]);
 
   const handleUpdate = () => {
@@ -101,6 +139,88 @@ export const AuthView: React.FC<AuthViewProps> = ({
     }
   };
 
+  const handleEditPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => setEditForm(prev => ({ ...prev, profilePhoto: reader.result as string }));
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const downloadIdentityCard = async () => {
+    if (!identityCardRef.current || !currentUser) return;
+    
+    setIsDownloading(true);
+    try {
+      // Capture the identity card as a canvas
+      const canvas = await html2canvas(identityCardRef.current, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+        logging: false,
+        useCORS: true,
+        width: identityCardRef.current.offsetWidth,
+        height: identityCardRef.current.offsetHeight
+      });
+      
+      // Get image data
+      const imgData = canvas.toDataURL('image/png');
+      
+      // Calculate dimensions for PDF (maintaining aspect ratio)
+      const cardWidth = identityCardRef.current.offsetWidth;
+      const cardHeight = identityCardRef.current.offsetHeight;
+      const aspectRatio = cardHeight / cardWidth;
+      
+      // PDF dimensions in mm (A4 is 210x297mm, but we'll use a custom size for the card)
+      // Convert pixels to mm (assuming 96 DPI: 1px = 0.264583mm)
+      const pdfWidth = 85; // ~320px in mm (standard ID card width)
+      const pdfHeight = pdfWidth * aspectRatio;
+      
+      // Create PDF
+      const pdf = new jsPDF({
+        orientation: pdfHeight > pdfWidth ? 'portrait' : 'landscape',
+        unit: 'mm',
+        format: [pdfWidth, pdfHeight]
+      });
+      
+      // Add image to PDF (fill the entire page)
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      
+      // Save PDF
+      pdf.save(`${currentUser.name || 'Identity'}_ID_Card.pdf`);
+    } catch (error) {
+      console.error('Failed to download identity card:', error);
+      alert('Failed to download identity card. Please try again.');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const handleEditProfileSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onUpdateProfile || !currentUser) return;
+    
+    try {
+      await onUpdateProfile({
+        name: editForm.name,
+        email: editForm.email,
+        username: editForm.username.toLowerCase().replace(/\s/g, '_'),
+        dob: editForm.dob,
+        department: editForm.department,
+        subDepartment: editForm.subDepartment,
+        designation: editForm.designation,
+        employeeId: editForm.employeeId,
+        contactNo: editForm.contactNo,
+        profilePhoto: editForm.profilePhoto
+      });
+      setIsEditingProfile(false);
+      alert('Profile updated successfully!');
+    } catch (error) {
+      console.error('Failed to update profile:', error);
+      alert('Failed to update profile. Please try again.');
+    }
+  };
+
   const resetForm = () => {
     setForm({
       name: '', email: '', username: '', dob: '', department: '', subDepartment: '',
@@ -137,7 +257,33 @@ export const AuthView: React.FC<AuthViewProps> = ({
     return (
       <div className="flex flex-col p-6 space-y-8 animate-in fade-in duration-500 pb-32 no-scrollbar">
         {/* Digital Identity Card (3:4 Portrait Ratio) */}
-        <div className="relative mx-auto w-full max-w-[320px] bg-white rounded-[2rem] shadow-2xl shadow-orange-900/10 border-4 border-orange-600 overflow-hidden flex flex-col group transition-all duration-500 hover:shadow-orange-600/20 min-h-[500px]">
+        <div className="relative mx-auto w-full max-w-[320px]">
+          <div className="flex items-center justify-between mb-3 px-2">
+            <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+              <UserCircle size={16} className="text-orange-600" /> Identity Card
+            </h3>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsEditingProfile(true)}
+                className="p-2 bg-white text-orange-600 rounded-xl border border-orange-100 hover:bg-orange-50 transition-all active:scale-95"
+                title="Edit Profile"
+              >
+                <Edit size={16} />
+              </button>
+              <button
+                onClick={downloadIdentityCard}
+                disabled={isDownloading}
+                className="p-2 bg-white text-orange-600 rounded-xl border border-orange-100 hover:bg-orange-50 transition-all active:scale-95 disabled:opacity-50"
+                title="Download Identity Card as PDF"
+              >
+                <Download size={16} />
+              </button>
+            </div>
+          </div>
+          <div 
+            ref={identityCardRef}
+            className="relative mx-auto w-full max-w-[320px] bg-white rounded-[2rem] shadow-2xl shadow-orange-900/10 border-4 border-orange-600 overflow-hidden flex flex-col group transition-all duration-500 hover:shadow-orange-600/20 min-h-[500px]"
+          >
           
           <div className="flex-1 bg-gradient-to-b from-slate-50 to-white flex flex-col items-center pt-8 px-6 pb-12 text-center">
             <div className="relative mb-4">
@@ -185,6 +331,128 @@ export const AuthView: React.FC<AuthViewProps> = ({
 
           </div>
         </div>
+        </div>
+
+        {/* Edit Profile Modal */}
+        {isEditingProfile && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-y-auto animate-in zoom-in-95">
+              <div className="sticky top-0 bg-white border-b border-slate-100 p-6 flex items-center justify-between z-10">
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-widest">Edit Profile</h3>
+                <button
+                  onClick={() => setIsEditingProfile(false)}
+                  className="p-2 hover:bg-slate-100 rounded-xl transition-all"
+                >
+                  <X size={20} className="text-slate-400" />
+                </button>
+              </div>
+              
+              <form onSubmit={handleEditProfileSubmit} className="p-6 space-y-6">
+                <div className="text-center">
+                  <div 
+                    onClick={() => editPhotoInputRef.current?.click()}
+                    className="w-24 h-24 bg-slate-50 border-2 border-dashed border-orange-200 rounded-full mx-auto mb-2 flex items-center justify-center cursor-pointer overflow-hidden group"
+                  >
+                    {editForm.profilePhoto ? (
+                      <img src={editForm.profilePhoto} className="w-full h-full object-cover" alt="Profile" />
+                    ) : (
+                      <Camera size={32} className="text-orange-300 group-hover:text-orange-500" />
+                    )}
+                  </div>
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Profile Photo</span>
+                  <input 
+                    type="file" 
+                    ref={editPhotoInputRef} 
+                    className="hidden" 
+                    accept="image/*" 
+                    onChange={handleEditPhotoUpload} 
+                  />
+                </div>
+
+                <div className="space-y-4">
+                  <SectionTitle title="Personal Details" icon={<UserCircle size={14}/>} />
+                  <div className="grid grid-cols-2 gap-3">
+                    <Input 
+                      placeholder="Full Name" 
+                      value={editForm.name} 
+                      onChange={(v: string) => setEditForm({...editForm, name: v})} 
+                      required 
+                    />
+                    <Input 
+                      placeholder="Username" 
+                      value={editForm.username} 
+                      onChange={(v: string) => setEditForm({...editForm, username: v})} 
+                      icon={<AtSign size={14}/>} 
+                      required 
+                    />
+                    <Input 
+                      type="date" 
+                      label="Date of Birth" 
+                      value={editForm.dob} 
+                      onChange={(v: string) => setEditForm({...editForm, dob: v})} 
+                    />
+                    <Input 
+                      placeholder="Contact No" 
+                      value={editForm.contactNo} 
+                      onChange={(v: string) => setEditForm({...editForm, contactNo: v})} 
+                      icon={<Phone size={14}/>} 
+                    />
+                    <Input 
+                      type="email" 
+                      placeholder="Email" 
+                      value={editForm.email} 
+                      onChange={(v: string) => setEditForm({...editForm, email: v})} 
+                      icon={<Mail size={14}/>} 
+                      required 
+                      className="col-span-2" 
+                    />
+                  </div>
+
+                  <SectionTitle title="Professional Details" icon={<Briefcase size={14}/>} />
+                  <div className="grid grid-cols-2 gap-3">
+                    <Input 
+                      placeholder="Employee ID" 
+                      value={editForm.employeeId} 
+                      onChange={(v: string) => setEditForm({...editForm, employeeId: v})} 
+                      icon={<Hash size={14}/>} 
+                    />
+                    <Input 
+                      placeholder="Designation" 
+                      value={editForm.designation} 
+                      onChange={(v: string) => setEditForm({...editForm, designation: v})} 
+                    />
+                    <Input 
+                      placeholder="Department" 
+                      value={editForm.department} 
+                      onChange={(v: string) => setEditForm({...editForm, department: v})} 
+                    />
+                    <Input 
+                      placeholder="Sub-Department" 
+                      value={editForm.subDepartment} 
+                      onChange={(v: string) => setEditForm({...editForm, subDepartment: v})} 
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingProfile(false)}
+                    className="flex-1 py-3 bg-slate-100 text-slate-700 font-black uppercase tracking-widest rounded-2xl hover:bg-slate-200 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit" 
+                    className="flex-1 py-3 bg-orange-600 text-white font-black uppercase tracking-widest rounded-2xl shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
+                  >
+                    <Save size={18} /> Save Changes
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
         {/* User Posts Section */}
         {userPosts && userPosts.length > 0 && (
@@ -436,7 +704,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
               </div>
 
               <button 
-                onClick={() => onLogin(loginUsername, loginPassword, verificationCode)}
+                onClick={() => onLogin(loginUsername, loginPassword, verificationCode, rememberMe)}
                 className="w-full py-5 bg-orange-600 text-white font-black uppercase tracking-widest rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-orange-100 active:scale-95 transition-all"
               >
                 Verify Identity
@@ -481,8 +749,20 @@ export const AuthView: React.FC<AuthViewProps> = ({
                 />
               </div>
             </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="rememberMe"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+                className="w-4 h-4 text-orange-600 border-slate-300 rounded focus:ring-orange-500"
+              />
+              <label htmlFor="rememberMe" className="text-[10px] font-bold text-slate-600 cursor-pointer">
+                Remember me (Stay logged in)
+              </label>
+            </div>
             <button 
-              onClick={() => onLogin(loginUsername, loginPassword)}
+              onClick={() => onLogin(loginUsername, loginPassword, undefined, rememberMe)}
               className="w-full py-5 bg-orange-600 text-white font-black uppercase tracking-[0.1em] rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-orange-200 active:scale-[0.98] transition-all"
             >
               <LogIn size={20} /> Initialize Access

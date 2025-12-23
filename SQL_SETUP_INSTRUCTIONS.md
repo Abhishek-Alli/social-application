@@ -116,3 +116,4 @@ ORDER BY tablename;
 Both files must be run in the Supabase SQL Editor for the app to work properly!
 
 
+

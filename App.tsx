@@ -158,27 +158,46 @@ const App: React.FC = () => {
     loadInitialData();
   }, []);
 
-  // Load current user from sessionStorage on mount (for session persistence only)
+  // Load current user from localStorage on mount (for persistent login)
   useEffect(() => {
-    const savedCurrentUser = sessionStorage.getItem('srj_current_user');
+    const savedCurrentUser = localStorage.getItem('srj_current_user');
     if (savedCurrentUser) {
       try {
         const user = JSON.parse(savedCurrentUser);
-        // Verify user still exists in database
+        console.log('🔄 Found saved user, auto-logging in...');
+        // Immediately set user for instant login (better UX on mobile)
+        setCurrentUser(user);
+        if (user.projectId) setCurrentProjectId(user.projectId);
+        console.log('✅ Auto-login successful');
+        
+        // Verify user still exists in database in the background
         userService.getById(user.id).then(dbUser => {
           if (dbUser) {
-            setCurrentUser(user);
-            if (user.projectId) setCurrentProjectId(user.projectId);
+            // Update with fresh data from database
+            setCurrentUser(dbUser);
+            // Update localStorage with fresh data
+            localStorage.setItem('srj_current_user', JSON.stringify(dbUser));
+            console.log('✅ User verified and updated from database');
           } else {
-            sessionStorage.removeItem('srj_current_user');
+            // User no longer exists, clear saved data
+            console.warn('⚠️ User no longer exists in database, clearing saved session');
+            setCurrentUser(null);
+            localStorage.removeItem('srj_current_user');
+            localStorage.removeItem('srj_saved_credentials');
           }
-        }).catch(() => {
-          sessionStorage.removeItem('srj_current_user');
+        }).catch((error) => {
+          // If database check fails (e.g., no internet), keep user logged in
+          // This is better for mobile - user can still use app offline
+          console.warn('⚠️ Could not verify user from database, keeping saved session (offline mode):', error);
+          // Don't clear the user - let them use the app with saved data
         });
       } catch (error) {
-        console.error('Failed to parse saved user:', error);
-        sessionStorage.removeItem('srj_current_user');
+        console.error('❌ Failed to parse saved user:', error);
+        localStorage.removeItem('srj_current_user');
+        localStorage.removeItem('srj_saved_credentials');
       }
+    } else {
+      console.log('ℹ️ No saved user found, showing login screen');
     }
   }, []);
 
@@ -330,23 +349,46 @@ const App: React.FC = () => {
             if (payload.eventType === 'INSERT') {
               const newPost = payload.new as any;
               setPosts(prev => [...prev, {
-                ...newPost,
+                id: newPost.id,
                 projectId: newPost.project_id || newPost.projectId,
                 userId: newPost.user_id || newPost.userId,
                 userName: newPost.user_name || newPost.userName,
                 userUsername: newPost.user_username || newPost.userUsername,
+                text: newPost.text || '',
+                image: newPost.image || undefined,
+                video: newPost.video || undefined,
+                ratio: newPost.ratio || '1:1',
+                likes: newPost.likes || [],
+                comments: newPost.comments || [],
+                mentions: newPost.mentions || [],
+                hashtags: newPost.hashtags || [],
                 createdAt: newPost.created_at || newPost.createdAt
               }]);
             } else if (payload.eventType === 'UPDATE') {
               const updatedPost = payload.new as any;
-              setPosts(prev => prev.map(p => p.id === updatedPost.id ? {
-                ...updatedPost,
-                projectId: updatedPost.project_id || updatedPost.projectId,
-                userId: updatedPost.user_id || updatedPost.userId,
-                userName: updatedPost.user_name || updatedPost.userName,
-                userUsername: updatedPost.user_username || updatedPost.userUsername,
-                createdAt: updatedPost.created_at || updatedPost.createdAt
-              } : p));
+              setPosts(prev => prev.map(p => {
+                if (p.id === updatedPost.id) {
+                  // Preserve existing post data and merge with updated fields
+                  return {
+                    ...p, // Preserve existing post data
+                    id: updatedPost.id,
+                    projectId: updatedPost.project_id || updatedPost.projectId || p.projectId,
+                    userId: updatedPost.user_id || updatedPost.userId || p.userId,
+                    userName: updatedPost.user_name || updatedPost.userName || p.userName,
+                    userUsername: updatedPost.user_username || updatedPost.userUsername || p.userUsername,
+                    text: updatedPost.text !== undefined ? updatedPost.text : p.text,
+                    image: updatedPost.image !== undefined ? updatedPost.image : p.image,
+                    video: updatedPost.video !== undefined ? updatedPost.video : p.video,
+                    ratio: updatedPost.ratio || p.ratio,
+                    likes: updatedPost.likes || p.likes || [],
+                    comments: updatedPost.comments || p.comments || [],
+                    mentions: updatedPost.mentions || p.mentions || [],
+                    hashtags: updatedPost.hashtags || p.hashtags || [],
+                    createdAt: updatedPost.created_at || updatedPost.createdAt || p.createdAt
+                  };
+                }
+                return p;
+              }));
             } else if (payload.eventType === 'DELETE') {
               setPosts(prev => prev.filter(p => p.id !== payload.old.id));
             }
@@ -535,13 +577,23 @@ const App: React.FC = () => {
               }]);
             } else if (payload.eventType === 'UPDATE') {
               const updatedGroup = payload.new as any;
-              setGroups(prev => prev.map(g => g.id === updatedGroup.id ? {
-                ...updatedGroup,
-                projectId: updatedGroup.project_id || updatedGroup.projectId,
-                createdBy: updatedGroup.created_by || updatedGroup.createdBy,
-                activeCall: updatedGroup.active_call || updatedGroup.activeCall,
-                createdAt: updatedGroup.created_at || updatedGroup.createdAt
-              } : g));
+              setGroups(prev => prev.map(g => {
+                if (g.id === updatedGroup.id) {
+                  // Preserve existing group data and merge with updated fields
+                  return {
+                    ...g, // Preserve existing group data
+                    id: updatedGroup.id,
+                    projectId: updatedGroup.project_id || updatedGroup.projectId || g.projectId,
+                    name: updatedGroup.name !== undefined ? updatedGroup.name : g.name,
+                    description: updatedGroup.description !== undefined ? updatedGroup.description : g.description,
+                    createdBy: updatedGroup.created_by || updatedGroup.createdBy || g.createdBy,
+                    members: updatedGroup.members || g.members || [],
+                    activeCall: updatedGroup.active_call !== undefined ? updatedGroup.active_call : g.activeCall,
+                    createdAt: updatedGroup.created_at || updatedGroup.createdAt || g.createdAt
+                  };
+                }
+                return g;
+              }));
             } else if (payload.eventType === 'DELETE') {
               setGroups(prev => prev.filter(g => g.id !== payload.old.id));
             }
@@ -566,12 +618,19 @@ const App: React.FC = () => {
     };
   }, [currentProjectId, currentUser]);
 
-  // Keep sessionStorage sync only for current user (for session persistence only)
-  useEffect(() => { 
+  // Keep localStorage/sessionStorage sync for current user
+  useEffect(() => {
     if (currentUser) {
-      sessionStorage.setItem('srj_current_user', JSON.stringify(currentUser));
+      // Check if user wants to be remembered (has entry in localStorage)
+      const savedUser = localStorage.getItem('srj_current_user');
+      if (savedUser) {
+        localStorage.setItem('srj_current_user', JSON.stringify(currentUser));
+      } else {
+        sessionStorage.setItem('srj_current_user', JSON.stringify(currentUser));
+      }
     } else {
       sessionStorage.removeItem('srj_current_user');
+      // Don't clear localStorage on logout - let user decide via "Remember Me"
     }
   }, [currentUser]);
 
@@ -649,7 +708,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleLogin = async (username: string, password?: string, code?: string) => {
+  const handleLogin = async (username: string, password?: string, code?: string, rememberMe?: boolean) => {
     if (!needsTwoStep) {
       // Remove @ symbol if user typed it and trim whitespace
       const cleanUsername = username.replace('@', '').trim().toLowerCase();
@@ -690,10 +749,27 @@ const App: React.FC = () => {
         if (user.isTwoStepEnabled) {
           setNeedsTwoStep(true);
           setPendingUser(user);
+          // Save credentials for 2-step if remember me is checked
+          if (rememberMe) {
+            localStorage.setItem('srj_saved_credentials', JSON.stringify({
+              username: cleanUsername,
+              password: cleanPassword
+            }));
+          }
           alert("2-Step Verification required. Enter '1234' to continue.");
           return;
         }
-        completeLogin(user);
+        completeLogin(user, rememberMe);
+        
+        // Save credentials if "Remember Me" is checked
+        if (rememberMe) {
+          localStorage.setItem('srj_saved_credentials', JSON.stringify({
+            username: cleanUsername,
+            password: cleanPassword
+          }));
+        } else {
+          localStorage.removeItem('srj_saved_credentials');
+        }
       } else {
         // Debug: Show available usernames in console
         console.log('Available users:', users.map(u => u.username));
@@ -703,17 +779,32 @@ const App: React.FC = () => {
     } 
     else if (pendingUser) {
       if (code === "1234") {
-        completeLogin(pendingUser);
+        // Get rememberMe from saved credentials
+        const savedCreds = localStorage.getItem('srj_saved_credentials');
+        const shouldRemember = !!savedCreds;
+        completeLogin(pendingUser, shouldRemember);
       } else {
         alert("Incorrect verification code.");
       }
     }
   };
 
-  const completeLogin = (user: User) => {
+  const completeLogin = (user: User, rememberMe?: boolean) => {
     setCurrentUser(user);
     if (user.projectId) setCurrentProjectId(user.projectId);
-    sessionStorage.setItem('srj_current_user', JSON.stringify(user));
+    
+    // Save to localStorage if "Remember Me" is checked, otherwise use sessionStorage
+    if (rememberMe) {
+      localStorage.setItem('srj_current_user', JSON.stringify(user));
+      console.log('✅ User saved to localStorage (Remember Me enabled)');
+    } else {
+      sessionStorage.setItem('srj_current_user', JSON.stringify(user));
+      // Clear localStorage if not remembering
+      localStorage.removeItem('srj_current_user');
+      localStorage.removeItem('srj_saved_credentials');
+      console.log('✅ User saved to sessionStorage only (Remember Me disabled)');
+    }
+    
     setNeedsTwoStep(false);
     setPendingUser(null);
     setView('tasks');
@@ -722,6 +813,9 @@ const App: React.FC = () => {
   const handleLogout = () => {
     setCurrentUser(null);
     sessionStorage.removeItem('srj_current_user');
+    // Clear localStorage only if user explicitly logs out (they want to disable "Remember Me")
+    localStorage.removeItem('srj_current_user');
+    localStorage.removeItem('srj_saved_credentials');
     setNeedsTwoStep(false);
     setPendingUser(null);
     setView('profile');
@@ -1274,8 +1368,21 @@ const App: React.FC = () => {
       // If it's a group call, update the group's active_call
       if (isGroup) {
         const group = groups.find(g => g.id === targetId);
-        if (group) {
-          await groupService.update(targetId, { activeCall: callInfo });
+        if (!group) {
+          throw new Error('Group not found');
+        }
+        await groupService.update(targetId, { activeCall: callInfo });
+        
+        // Notify all group members about the call
+        const groupMembers = users.filter(u => group.members.includes(u.id) && u.id !== currentUser.id);
+        for (const member of groupMembers) {
+          await addNotification(
+            member.id,
+            `Group ${type === 'video' ? 'Video' : 'Audio'} Call`,
+            `${currentUser.name} started a ${type} call in ${group.name}`,
+            'call',
+            'chat'
+          );
         }
       } else {
         // For direct calls, create a message with call info
@@ -1287,10 +1394,8 @@ const App: React.FC = () => {
           callInfo,
           status: 'sent'
         });
-      }
 
-      // Notify the other user
-      if (!isGroup) {
+        // Notify the other user
         const targetUser = users.find(u => u.id === targetId);
         if (targetUser) {
           await addNotification(
@@ -1302,9 +1407,10 @@ const App: React.FC = () => {
           );
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to start call:', error);
-      alert('Failed to start call. Please try again.');
+      const errorMessage = error?.message || error?.toString() || 'Failed to start call. Please try again.';
+      alert(errorMessage);
     }
   };
 

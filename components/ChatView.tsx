@@ -57,6 +57,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const webrtcRef = useRef<WebRTCService | null>(null);
   const signalingChannelRef = useRef<any>(null);
+  const ringtoneRef = useRef<HTMLAudioElement | null>(null);
+  const ringtoneIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -78,6 +80,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
     signalingChannelRef.current = channel;
 
     return () => {
+      stopRingtone();
       if (webrtcRef.current) {
         webrtcRef.current.endCall();
       }
@@ -119,6 +122,52 @@ export const ChatView: React.FC<ChatViewProps> = ({
     }
   };
 
+  // Play ringing sound
+  const playRingtone = () => {
+    // Create a simple ringtone using Web Audio API
+    if (ringtoneIntervalRef.current) return; // Already playing
+    
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      
+      const playTone = () => {
+        try {
+          const oscillator = audioContext.createOscillator();
+          const gainNode = audioContext.createGain();
+          
+          oscillator.connect(gainNode);
+          gainNode.connect(audioContext.destination);
+          
+          oscillator.frequency.value = 800;
+          oscillator.type = 'sine';
+          gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+          
+          oscillator.start(audioContext.currentTime);
+          oscillator.stop(audioContext.currentTime + 0.5);
+        } catch (error) {
+          console.warn('Error playing ringtone tone:', error);
+        }
+      };
+      
+      // Play tone twice per second
+      playTone();
+      ringtoneIntervalRef.current = setInterval(() => {
+        playTone();
+      }, 1000);
+    } catch (error) {
+      console.warn('Error initializing ringtone:', error);
+    }
+  };
+
+  // Stop ringing sound
+  const stopRingtone = () => {
+    if (ringtoneIntervalRef.current) {
+      clearInterval(ringtoneIntervalRef.current);
+      ringtoneIntervalRef.current = null;
+    }
+  };
+
   const handleCallSignal = async (signal: any) => {
     // Only process signals meant for current user
     if (!currentUser || signal.to !== currentUser.id) return;
@@ -127,6 +176,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
     try {
       switch (signal.type) {
         case 'call-request':
+          // Play ringing sound for incoming call
+          playRingtone();
           // Incoming call - only show if not already in a call
           if (!showCallOverlay && !incomingCall) {
             setIncomingCall({
@@ -179,6 +230,12 @@ export const ChatView: React.FC<ChatViewProps> = ({
         case 'call-ended':
         case 'call-rejected':
           // Call ended or rejected
+          stopRingtone();
+          endCall();
+          break;
+        case 'call-ended':
+          // Call ended by other party
+          stopRingtone();
           endCall();
           break;
       }
@@ -261,25 +318,98 @@ export const ChatView: React.FC<ChatViewProps> = ({
     setReplyingTo(null);
   };
 
+  // Check and request permissions with better error handling
+  const requestMediaPermissions = async (isVideo: boolean): Promise<MediaStream> => {
+    // First, check current permission status
+    let cameraStatus = 'prompt';
+    let micStatus = 'prompt';
+    
+    try {
+      if (navigator.permissions && navigator.permissions.query) {
+        if (isVideo) {
+          try {
+            const cameraPermission = await (navigator.permissions as any).query({ name: 'camera' });
+            cameraStatus = cameraPermission?.state || 'prompt';
+          } catch (e) {
+            console.warn('Could not check camera permission:', e);
+          }
+        }
+        try {
+          const micPermission = await (navigator.permissions as any).query({ name: 'microphone' });
+          micStatus = micPermission?.state || 'prompt';
+        } catch (e) {
+          console.warn('Could not check microphone permission:', e);
+        }
+      }
+    } catch (e) {
+      console.warn('Permission API not available:', e);
+    }
+
+    // If permissions are denied, show helpful message
+    if (cameraStatus === 'denied' && isVideo) {
+      throw new Error('CAMERA_DENIED');
+    }
+    if (micStatus === 'denied') {
+      throw new Error('MICROPHONE_DENIED');
+    }
+
+    // Try with advanced constraints first
+    let constraints: MediaStreamConstraints = {
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      },
+      video: isVideo ? {
+        width: { ideal: 1280, min: 640 },
+        height: { ideal: 720, min: 480 },
+        facingMode: 'user',
+        frameRate: { ideal: 30, min: 15 }
+      } : false
+    };
+
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (error: any) {
+      // If advanced constraints fail, try simpler ones
+      if (error.name === 'OverconstrainedError' || error.name === 'ConstraintNotSatisfiedError') {
+        console.warn('Advanced constraints failed, trying simpler constraints');
+        constraints = {
+          audio: true,
+          video: isVideo ? true : false
+        };
+        return await navigator.mediaDevices.getUserMedia(constraints);
+      }
+      throw error;
+    }
+  };
+
   const handleCall = async (type: 'audio' | 'video') => {
     const targetId = activeChatUser ? activeChatUser.id : activeGroup!.id;
     const isGroup = !!activeGroup;
 
-    if (isGroup) {
-      // Group calls - just update database (WebRTC for groups is more complex)
-      onStartCall(type, targetId, isGroup);
-      setShowCallOverlay({
-        id: 'call_' + Date.now(),
-        type,
-        status: 'active',
-        startedBy: currentUser.id,
-        groupId: targetId
-      });
-      return;
-    }
-
-    // Direct calls - use WebRTC
+    // Request media access for both group and direct calls
     try {
+      // Request camera/microphone permissions first
+      const stream = await requestMediaPermissions(type === 'video');
+      
+      // Stop the stream immediately - we'll get it again when WebRTC is set up
+      stream.getTracks().forEach(track => track.stop());
+
+      if (isGroup) {
+        // Group calls - update database and show overlay
+        onStartCall(type, targetId, isGroup);
+        setShowCallOverlay({
+          id: 'call_' + Date.now(),
+          type,
+          status: 'active',
+          startedBy: currentUser.id,
+          groupId: targetId
+        });
+        return;
+      }
+
+      // Direct calls - use WebRTC
       const callId = 'call_' + Date.now();
       webrtcRef.current = new WebRTCService();
       
@@ -300,7 +430,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
         sendSignal('ice-candidate', targetId, { candidate }, callId);
       });
       
-      // Start local stream
+      // Start local stream (permissions already granted, so this should work)
       const localStream = await webrtcRef.current.startCall(type === 'video');
       setIsCallActive(true);
       setIsMuted(false);
@@ -330,19 +460,110 @@ export const ChatView: React.FC<ChatViewProps> = ({
       onStartCall(type, targetId, false);
     } catch (error: any) {
       console.error('Failed to start call:', error);
-      alert(error.message || 'Failed to start call. Please check camera/microphone permissions.');
+      let errorMessage = '';
+      let showInstructions = false;
+      
+      if (error.message === 'CAMERA_DENIED' || error.message === 'MICROPHONE_DENIED' || 
+          error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        errorMessage = 'Camera/Microphone Access Denied\n\n';
+        showInstructions = true;
+        
+        const browser = navigator.userAgent.includes('Chrome') ? 'Chrome' :
+                       navigator.userAgent.includes('Firefox') ? 'Firefox' :
+                       navigator.userAgent.includes('Safari') ? 'Safari' : 'your browser';
+        
+        if (browser === 'Chrome') {
+          errorMessage += 'To fix this in Chrome:\n' +
+            '1. Click the lock icon (🔒) in the address bar\n' +
+            '2. Find "Camera" and "Microphone" in the list\n' +
+            '3. Change them from "Block" to "Allow"\n' +
+            '4. Refresh the page and try again\n\n' +
+            'OR go to: Settings → Privacy and security → Site settings → Camera/Microphone\n' +
+            'Find this site and change to "Allow"';
+        } else if (browser === 'Firefox') {
+          errorMessage += 'To fix this in Firefox:\n' +
+            '1. Click the shield icon in the address bar\n' +
+            '2. Click "Permissions" → "Use Camera" and "Use Microphone"\n' +
+            '3. Select "Allow" for both\n' +
+            '4. Refresh the page and try again';
+        } else if (browser === 'Safari') {
+          errorMessage += 'To fix this in Safari:\n' +
+            '1. Go to Safari → Settings → Websites\n' +
+            '2. Select "Camera" and "Microphone"\n' +
+            '3. Find this website and set to "Allow"\n' +
+            '4. Refresh the page and try again';
+        } else {
+          errorMessage += 'To fix this:\n' +
+            '1. Check your browser\'s site permissions\n' +
+            '2. Allow camera and microphone for this site\n' +
+            '3. Refresh the page and try again';
+        }
+      } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+        errorMessage = 'No camera or microphone found.\n\n' +
+          'Please:\n' +
+          '1. Make sure your camera/microphone is connected\n' +
+          '2. Check that no other application is using them\n' +
+          '3. Try refreshing the page';
+      } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+        errorMessage = 'Camera/microphone is already in use.\n\n' +
+          'Please close other applications using your camera/microphone and try again.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      } else {
+        errorMessage = 'Failed to access camera/microphone.\n\n' +
+          'Please check your browser permissions and make sure your camera/microphone is connected.';
+      }
+      
+      alert(errorMessage);
+      if (showInstructions) {
+        // Try to open browser settings if possible
+        console.log('User needs to manually enable permissions in browser settings');
+      }
+      
       if (webrtcRef.current) {
         webrtcRef.current.endCall();
         webrtcRef.current = null;
       }
+      setIsCallActive(false);
+      setShowCallOverlay(null);
     }
   };
 
   const answerCall = async () => {
     if (!incomingCall) return;
 
+    // Stop ringing and play answer sound
+    stopRingtone();
+    
+    // Play a short "answer" tone
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      oscillator.frequency.value = 1000;
+      oscillator.type = 'sine';
+      gainNode.gain.setValueAtTime(0.2, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+      
+      oscillator.start(audioContext.currentTime);
+      oscillator.stop(audioContext.currentTime + 0.2);
+    } catch (audioError) {
+      console.warn('Could not play answer sound:', audioError);
+    }
+
     try {
       const callType = incomingCall.type;
+      
+      // Request camera/microphone permissions first
+      const stream = await requestMediaPermissions(callType === 'video');
+      
+      // Stop the stream immediately - we'll get it again when WebRTC is set up
+      stream.getTracks().forEach(track => track.stop());
+
       webrtcRef.current = new WebRTCService();
       
       // Set up remote stream handler
@@ -362,7 +583,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
         sendSignal('ice-candidate', incomingCall.from, { candidate }, incomingCall.callId);
       });
       
-      // Start local stream
+      // Start local stream (permissions already granted, so this should work)
       const localStream = await webrtcRef.current.startCall(callType === 'video');
       setIsCallActive(true);
       setIsMuted(false);
@@ -389,12 +610,72 @@ export const ChatView: React.FC<ChatViewProps> = ({
       // The offer will be handled in handleCallSignal
     } catch (error: any) {
       console.error('Failed to answer call:', error);
-      alert(error.message || 'Failed to answer call. Please check camera/microphone permissions.');
+      let errorMessage = '';
+      let showInstructions = false;
+      
+      if (error.message === 'CAMERA_DENIED' || error.message === 'MICROPHONE_DENIED' || 
+          error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        errorMessage = 'Camera/Microphone Access Denied\n\n';
+        showInstructions = true;
+        
+        const browser = navigator.userAgent.includes('Chrome') ? 'Chrome' :
+                       navigator.userAgent.includes('Firefox') ? 'Firefox' :
+                       navigator.userAgent.includes('Safari') ? 'Safari' : 'your browser';
+        
+        if (browser === 'Chrome') {
+          errorMessage += 'To fix this in Chrome:\n' +
+            '1. Click the lock icon (🔒) in the address bar\n' +
+            '2. Find "Camera" and "Microphone" in the list\n' +
+            '3. Change them from "Block" to "Allow"\n' +
+            '4. Refresh the page and try again\n\n' +
+            'OR go to: Settings → Privacy and security → Site settings → Camera/Microphone\n' +
+            'Find this site and change to "Allow"';
+        } else if (browser === 'Firefox') {
+          errorMessage += 'To fix this in Firefox:\n' +
+            '1. Click the shield icon in the address bar\n' +
+            '2. Click "Permissions" → "Use Camera" and "Use Microphone"\n' +
+            '3. Select "Allow" for both\n' +
+            '4. Refresh the page and try again';
+        } else if (browser === 'Safari') {
+          errorMessage += 'To fix this in Safari:\n' +
+            '1. Go to Safari → Settings → Websites\n' +
+            '2. Select "Camera" and "Microphone"\n' +
+            '3. Find this website and set to "Allow"\n' +
+            '4. Refresh the page and try again';
+        } else {
+          errorMessage += 'To fix this:\n' +
+            '1. Check your browser\'s site permissions\n' +
+            '2. Allow camera and microphone for this site\n' +
+            '3. Refresh the page and try again';
+        }
+      } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+        errorMessage = 'No camera or microphone found.\n\n' +
+          'Please:\n' +
+          '1. Make sure your camera/microphone is connected\n' +
+          '2. Check that no other application is using them';
+      } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+        errorMessage = 'Camera/microphone is already in use.\n\n' +
+          'Please close other applications using your camera/microphone and try again.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      } else {
+        errorMessage = 'Failed to access camera/microphone.\n\n' +
+          'Please check your browser permissions and make sure your camera/microphone is connected.';
+      }
+      
+      alert(errorMessage);
+      if (webrtcRef.current) {
+        webrtcRef.current.endCall();
+        webrtcRef.current = null;
+      }
+      setIsCallActive(false);
+      setShowCallOverlay(null);
       rejectCall();
     }
   };
 
   const rejectCall = () => {
+    stopRingtone();
     if (incomingCall) {
       sendSignal('call-rejected', incomingCall.from, {}, incomingCall.callId);
       setIncomingCall(null);
@@ -402,6 +683,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   };
 
   const endCall = () => {
+    stopRingtone();
     if (webrtcRef.current) {
       webrtcRef.current.endCall();
       webrtcRef.current = null;
@@ -474,6 +756,47 @@ export const ChatView: React.FC<ChatViewProps> = ({
     });
   };
 
+  // Incoming call UI
+  if (incomingCall) {
+    const caller = allUsers.find(u => u.id === incomingCall.from);
+    return (
+      <div className="fixed inset-0 z-[100] bg-slate-900/95 backdrop-blur-sm flex flex-col items-center justify-center p-10 animate-in fade-in zoom-in">
+        <div className="text-center">
+          <div className="w-32 h-32 bg-orange-600 rounded-full mx-auto flex items-center justify-center mb-8 ring-8 ring-orange-600/30 animate-pulse">
+            {incomingCall.type === 'video' ? <Camera size={48} className="text-white" /> : <Phone size={48} className="text-white" />}
+          </div>
+          <h2 className="text-3xl font-bold text-white mb-2">
+            {caller?.name || 'Unknown User'}
+          </h2>
+          <p className="text-orange-400 font-bold uppercase tracking-widest text-sm mb-8 animate-pulse">
+            Incoming {incomingCall.type === 'video' ? 'Video' : 'Audio'} Call
+          </p>
+          
+          <div className="flex items-center justify-center gap-6">
+            <button
+              onClick={rejectCall}
+              className="w-16 h-16 bg-rose-600 text-white rounded-full flex items-center justify-center shadow-2xl shadow-rose-900/50 active:scale-90 transition-all hover:bg-rose-700"
+              title="Decline"
+            >
+              <PhoneOff size={28} />
+            </button>
+            <button
+              onClick={answerCall}
+              className="w-20 h-20 bg-emerald-600 text-white rounded-full flex items-center justify-center shadow-2xl shadow-emerald-900/50 active:scale-90 transition-all hover:bg-emerald-700 animate-pulse"
+              title="Answer"
+            >
+              <Phone size={32} />
+            </button>
+          </div>
+          <div className="flex items-center justify-center gap-12 mt-4">
+            <span className="text-[10px] text-slate-400 font-bold uppercase">Decline</span>
+            <span className="text-[10px] text-emerald-400 font-bold uppercase">Answer</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (showCallOverlay) {
     return (
       <div className="fixed inset-0 z-[100] bg-slate-900 flex flex-col items-center justify-between p-10 animate-in fade-in zoom-in">
@@ -492,24 +815,39 @@ export const ChatView: React.FC<ChatViewProps> = ({
         <div className="flex flex-col items-center gap-4 w-full">
            <div className="bg-slate-800 p-6 rounded-3xl grid grid-cols-2 gap-8 mb-10">
               <div className="flex flex-col items-center gap-2">
-                <button className="w-14 h-14 bg-slate-700 rounded-full flex items-center justify-center text-white"><Mic size={24}/></button>
-                <span className="text-[10px] text-slate-400 font-bold">Mute</span>
+                <button 
+                  onClick={toggleMute}
+                  className={`w-14 h-14 rounded-full flex items-center justify-center text-white transition-all active:scale-95 ${
+                    isMuted ? 'bg-rose-600' : 'bg-slate-700 hover:bg-slate-600'
+                  }`}
+                >
+                  <Mic size={24} />
+                </button>
+                <span className="text-[10px] text-slate-400 font-bold">{isMuted ? 'Unmute' : 'Mute'}</span>
               </div>
-              <div className="flex flex-col items-center gap-2">
-                <button className="w-14 h-14 bg-slate-700 rounded-full flex items-center justify-center text-white"><Camera size={24}/></button>
-                <span className="text-[10px] text-slate-400 font-bold">Video</span>
-              </div>
+              {showCallOverlay.type === 'video' && (
+                <div className="flex flex-col items-center gap-2">
+                  <button 
+                    onClick={toggleVideo}
+                    className={`w-14 h-14 rounded-full flex items-center justify-center text-white transition-all active:scale-95 ${
+                      isVideoOff ? 'bg-rose-600' : 'bg-slate-700 hover:bg-slate-600'
+                    }`}
+                  >
+                    <Camera size={24} />
+                  </button>
+                  <span className="text-[10px] text-slate-400 font-bold">{isVideoOff ? 'Show' : 'Hide'}</span>
+                </div>
+              )}
            </div>
            
            <button 
-             onClick={() => {
-               onEndCall(showCallOverlay.id);
-               setShowCallOverlay(null);
-             }}
-             className="w-20 h-20 bg-rose-600 text-white rounded-full flex items-center justify-center shadow-2xl shadow-rose-900/50 active:scale-90 transition-all"
+             onClick={endCall}
+             className="w-20 h-20 bg-rose-600 text-white rounded-full flex items-center justify-center shadow-2xl shadow-rose-900/50 active:scale-90 transition-all hover:bg-rose-700"
+             title="End Call"
            >
              <PhoneOff size={32} />
            </button>
+           <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">End Call</span>
         </div>
       </div>
     );

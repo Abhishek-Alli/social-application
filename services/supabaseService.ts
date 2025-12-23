@@ -594,9 +594,15 @@ export const groupService = {
 
   async update(id: string, updates: Partial<Group>): Promise<Group> {
     const updateData: any = { ...updates };
-    if (updates.projectId) updateData.project_id = updates.projectId;
-    if (updates.createdBy) updateData.created_by = updates.createdBy;
-    if (updates.activeCall) updateData.active_call = updates.activeCall;
+    // Map camelCase to snake_case for database
+    if (updates.projectId !== undefined) updateData.project_id = updates.projectId;
+    if (updates.createdBy !== undefined) updateData.created_by = updates.createdBy;
+    if (updates.activeCall !== undefined) updateData.active_call = updates.activeCall;
+    
+    // Remove camelCase fields that were mapped
+    delete updateData.projectId;
+    delete updateData.createdBy;
+    delete updateData.activeCall;
     
     const { data, error } = await supabase
       .from('groups')
@@ -605,7 +611,18 @@ export const groupService = {
       .select()
       .single();
     if (error) throw error;
-    return data;
+    
+    // Map snake_case back to camelCase
+    return {
+      id: data.id,
+      projectId: data.project_id || data.projectId,
+      name: data.name,
+      description: data.description || null,
+      createdBy: data.created_by || data.createdBy,
+      members: data.members || [],
+      createdAt: data.created_at || data.createdAt,
+      activeCall: data.active_call || data.activeCall || null
+    };
   },
 
   async delete(id: string): Promise<void> {

@@ -61,17 +61,77 @@ export class WebRTCService {
 
   async startCall(isVideo: boolean): Promise<MediaStream> {
     try {
+      // Check if mediaDevices API is available
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Your browser does not support camera/microphone access. Please use a modern browser like Chrome, Firefox, or Edge.');
+      }
+
+      // Check if we're on HTTPS (required for getUserMedia in most browsers)
+      if (typeof window !== 'undefined') {
+        const protocol = window.location.protocol;
+        const hostname = window.location.hostname;
+        if (protocol !== 'https:' && hostname !== 'localhost' && hostname !== '127.0.0.1') {
+          console.warn('getUserMedia requires HTTPS in production. Current protocol:', protocol);
+        }
+      }
+
+      // Check permissions first (if supported)
+      try {
+        if (navigator.permissions && navigator.permissions.query) {
+          if (isVideo) {
+            try {
+              const cameraPermission = await (navigator.permissions as any).query({ name: 'camera' });
+              if (cameraPermission && cameraPermission.state === 'denied') {
+                throw new Error('Camera access is denied. Please enable camera permissions in your browser settings and reload the page.');
+              }
+            } catch (camError: any) {
+              // Camera permission API might not be supported, continue
+              console.warn('Camera permission check not available:', camError);
+            }
+          }
+          try {
+            const micPermission = await (navigator.permissions as any).query({ name: 'microphone' });
+            if (micPermission && micPermission.state === 'denied') {
+              throw new Error('Microphone access is denied. Please enable microphone permissions in your browser settings and reload the page.');
+            }
+          } catch (micError: any) {
+            // Microphone permission API might not be supported, continue
+            console.warn('Microphone permission check not available:', micError);
+          }
+        }
+      } catch (permError: any) {
+        // Permission API might not be supported or might fail, continue anyway
+        console.warn('Permission check failed, continuing:', permError);
+      }
+
       // Get user media (camera/microphone)
       const constraints: MediaStreamConstraints = {
-        audio: true,
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        },
         video: isVideo ? {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          facingMode: 'user'
+          width: { ideal: 1280, min: 640 },
+          height: { ideal: 720, min: 480 },
+          facingMode: 'user',
+          frameRate: { ideal: 30, min: 15 }
         } : false
       };
 
       this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
+      
+      // Verify we got the expected tracks
+      const audioTracks = this.localStream.getAudioTracks();
+      const videoTracks = this.localStream.getVideoTracks();
+      
+      if (audioTracks.length === 0) {
+        throw new Error('No microphone found or microphone access was denied.');
+      }
+      
+      if (isVideo && videoTracks.length === 0) {
+        throw new Error('No camera found or camera access was denied.');
+      }
       
       // Add tracks to peer connection
       this.localStream.getTracks().forEach(track => {
@@ -81,9 +141,50 @@ export class WebRTCService {
       });
 
       return this.localStream;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error accessing media devices:', error);
-      throw new Error('Failed to access camera/microphone. Please check permissions.');
+      
+      // Provide specific error messages based on error type
+      let errorMessage = 'Failed to access camera/microphone. ';
+      
+      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        errorMessage = 'Camera/microphone access was denied. Please:\n' +
+          '1. Click the lock icon in your browser\'s address bar\n' +
+          '2. Allow camera and microphone permissions\n' +
+          '3. Reload the page and try again';
+      } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+        errorMessage = 'No camera or microphone found. Please:\n' +
+          '1. Make sure your camera/microphone is connected\n' +
+          '2. Check that no other application is using them\n' +
+          '3. Try refreshing the page';
+      } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+        errorMessage = 'Camera/microphone is already in use by another application. Please close other applications using your camera/microphone and try again.';
+      } else if (error.name === 'OverconstrainedError') {
+        errorMessage = 'Camera/microphone settings are not supported. Trying with basic settings...';
+        // Try with simpler constraints
+        try {
+          const simpleConstraints: MediaStreamConstraints = {
+            audio: true,
+            video: isVideo ? true : false
+          };
+          this.localStream = await navigator.mediaDevices.getUserMedia(simpleConstraints);
+          this.localStream.getTracks().forEach(track => {
+            if (this.peerConnection) {
+              this.peerConnection.addTrack(track, this.localStream!);
+            }
+          });
+          return this.localStream;
+        } catch (retryError: any) {
+          errorMessage = 'Failed to access camera/microphone with basic settings. Please check your device permissions.';
+          throw new Error(errorMessage);
+        }
+      } else if (error.message) {
+        errorMessage = error.message;
+      } else {
+        errorMessage += 'Please check your browser permissions and make sure your camera/microphone is connected.';
+      }
+      
+      throw new Error(errorMessage);
     }
   }
 
