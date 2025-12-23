@@ -966,21 +966,32 @@ const App: React.FC = () => {
   const addSubordinate = async (userData: Partial<User>) => {
     if (!currentUser || !currentProjectId) return;
     try {
+      // Validate required fields
+      if (!userData.name || !userData.email || !userData.username) {
+        alert('Name, email, and username are required fields.');
+        return;
+      }
+      
       const newUser = await userService.create({
-      name: userData.name || 'New Personnel',
-      email: userData.email || '',
-      username: userData.username || 'user_' + Date.now(),
-      role: userData.role || Role.EMPLOYEE,
-      parentId: currentUser.id,
-      projectId: currentProjectId,
-      isEmailVerified: false,
-      isTwoStepEnabled: false,
-      ...userData
+        name: userData.name,
+        email: userData.email,
+        username: userData.username,
+        role: userData.role || Role.EMPLOYEE,
+        parentId: currentUser.id,
+        projectId: currentProjectId,
+        isEmailVerified: false,
+        isTwoStepEnabled: false,
+        ...userData
       });
-    setUsers(prev => [...prev, newUser]);
-    } catch (error) {
+      setUsers(prev => [...prev, newUser]);
+    } catch (error: any) {
       console.error('Failed to add subordinate:', error);
-      alert('Failed to add subordinate. Please try again.');
+      const errorMessage = error?.message || 'Failed to add subordinate. Please try again.';
+      if (errorMessage.includes('username') || errorMessage.includes('unique')) {
+        alert('Username already exists. Please choose a different username.');
+      } else {
+        alert(errorMessage);
+      }
     }
   };
 

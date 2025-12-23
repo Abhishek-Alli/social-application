@@ -15,6 +15,29 @@ import {
 
 export const supabase = createClient(supabaseConfig.url, supabaseConfig.anonKey);
 
+// Helper function to map database user row to User type
+const mapDbUserToUser = (data: any): User => ({
+  id: data.id,
+  name: data.name,
+  email: data.email,
+  username: data.username,
+  role: data.role,
+  parentId: data.parent_id || null,
+  projectId: data.project_id || null,
+  employeeId: data.employee_id || null,
+  department: data.department || null,
+  subDepartment: data.sub_department || null,
+  designation: data.designation || null,
+  dob: data.dob || null,
+  contactNo: data.contact_no || null,
+  profilePhoto: data.profile_photo || null,
+  password: data.password || null,
+  isTwoStepEnabled: data.is_two_step_enabled || false,
+  isEmailVerified: data.is_email_verified || false,
+  telegramUserId: data.telegram_user_id || null,
+  telegramToken: data.telegram_token || null
+});
+
 // User Operations
 export const userService = {
   async getAll(): Promise<User[]> {
@@ -22,7 +45,7 @@ export const userService = {
       .from('users')
       .select('*');
     if (error) throw error;
-    return data || [];
+    return (data || []).map(mapDbUserToUser);
   },
 
   async getById(id: string): Promise<User | null> {
@@ -32,28 +55,77 @@ export const userService = {
       .eq('id', id)
       .single();
     if (error) return null;
-    return data;
+    return data ? mapDbUserToUser(data) : null;
   },
 
   async create(user: Omit<User, 'id'>): Promise<User> {
+    // Generate a unique ID for the user
+    const userId = 'u' + Date.now().toString() + Math.random().toString(36).substring(2, 11);
+    
     const { data, error } = await supabase
       .from('users')
-      .insert(user)
+      .insert({
+        id: userId,
+        name: user.name,
+        email: user.email,
+        username: user.username,
+        role: user.role,
+        parent_id: user.parentId || null,
+        project_id: user.projectId || null,
+        employee_id: user.employeeId || null,
+        department: user.department || null,
+        sub_department: user.subDepartment || null,
+        designation: user.designation || null,
+        dob: user.dob || null,
+        contact_no: user.contactNo || null,
+        profile_photo: user.profilePhoto || null,
+        password: user.password || null,
+        is_two_step_enabled: user.isTwoStepEnabled || false,
+        is_email_verified: user.isEmailVerified || false,
+        telegram_user_id: user.telegramUserId || null,
+        telegram_token: user.telegramToken || null
+      })
       .select()
       .single();
     if (error) throw error;
-    return data;
+    
+    return mapDbUserToUser(data);
   },
 
   async update(id: string, updates: Partial<User>): Promise<User> {
+    const updateData: any = { ...updates };
+    // Map camelCase to snake_case for database
+    if (updates.parentId !== undefined) updateData.parent_id = updates.parentId;
+    if (updates.projectId !== undefined) updateData.project_id = updates.projectId;
+    if (updates.employeeId !== undefined) updateData.employee_id = updates.employeeId;
+    if (updates.subDepartment !== undefined) updateData.sub_department = updates.subDepartment;
+    if (updates.contactNo !== undefined) updateData.contact_no = updates.contactNo;
+    if (updates.profilePhoto !== undefined) updateData.profile_photo = updates.profilePhoto;
+    if (updates.isTwoStepEnabled !== undefined) updateData.is_two_step_enabled = updates.isTwoStepEnabled;
+    if (updates.isEmailVerified !== undefined) updateData.is_email_verified = updates.isEmailVerified;
+    if (updates.telegramUserId !== undefined) updateData.telegram_user_id = updates.telegramUserId;
+    if (updates.telegramToken !== undefined) updateData.telegram_token = updates.telegramToken;
+    
+    // Remove camelCase fields that were mapped
+    delete updateData.parentId;
+    delete updateData.projectId;
+    delete updateData.employeeId;
+    delete updateData.subDepartment;
+    delete updateData.contactNo;
+    delete updateData.profilePhoto;
+    delete updateData.isTwoStepEnabled;
+    delete updateData.isEmailVerified;
+    delete updateData.telegramUserId;
+    delete updateData.telegramToken;
+    
     const { data, error } = await supabase
       .from('users')
-      .update(updates)
+      .update(updateData)
       .eq('id', id)
       .select()
       .single();
     if (error) throw error;
-    return data;
+    return mapDbUserToUser(data);
   },
 
   async delete(id: string): Promise<void> {
