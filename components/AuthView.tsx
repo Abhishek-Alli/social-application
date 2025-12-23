@@ -21,6 +21,7 @@ interface AuthViewProps {
   needsTwoStep?: boolean;
   userPosts?: any[];
   onDeletePost?: (postId: string) => void;
+  projectDomain?: string;
 }
 
 export const AuthView: React.FC<AuthViewProps> = ({ 
@@ -33,7 +34,8 @@ export const AuthView: React.FC<AuthViewProps> = ({
   onRegister,
   needsTwoStep = false,
   userPosts = [],
-  onDeletePost
+  onDeletePost,
+  projectDomain
 }) => {
   const [loginUsername, setLoginUsername] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -568,7 +570,18 @@ export const AuthView: React.FC<AuthViewProps> = ({
                     <Input placeholder="Custom Username" value={form.username} onChange={(v: string) => setForm({...form, username: v})} icon={<AtSign size={14}/>} required />
                     <Input type="date" label="DOB" value={form.dob} onChange={(v: string) => setForm({...form, dob: v})} />
                     <Input placeholder="Contact No" value={form.contactNo} onChange={(v: string) => setForm({...form, contactNo: v})} icon={<Phone size={14}/>} />
-                    <Input type="email" placeholder="Work Email" value={form.email} onChange={(v: string) => setForm({...form, email: v})} icon={<Mail size={14}/>} required className="col-span-2" />
+                    <Input 
+                      type="email" 
+                      placeholder={projectDomain ? `Work Email (username@${projectDomain})` : "Work Email"} 
+                      value={form.email} 
+                      onChange={(v: string) => setForm({...form, email: v})} 
+                      icon={<Mail size={14}/>} 
+                      required 
+                      className="col-span-2" 
+                    />
+                    {projectDomain && (
+                      <p className="text-[9px] text-slate-400 mt-1 ml-1 col-span-2">Email must use @{projectDomain} domain</p>
+                    )}
                   </div>
 
                   <SectionTitle title="Professional Placement" icon={<Briefcase size={14}/>} />
@@ -660,7 +673,16 @@ export const AuthView: React.FC<AuthViewProps> = ({
             <h3 className="text-center text-sm font-black uppercase text-slate-800 mb-2">Request Corporate ID</h3>
             <div className="space-y-3">
               <Input placeholder="Full Name" value={form.name} onChange={(v: string) => setForm({...form, name: v})} required icon={<UserCircle size={16}/>} />
-              <Input placeholder="Email Address" value={form.email} onChange={(v: string) => setForm({...form, email: v})} required icon={<Mail size={16}/>} />
+              <Input 
+                placeholder={projectDomain ? `Email Address (username@${projectDomain})` : "Email Address"} 
+                value={form.email} 
+                onChange={(v: string) => setForm({...form, email: v})} 
+                required 
+                icon={<Mail size={16}/>} 
+              />
+              {projectDomain && (
+                <p className="text-[9px] text-slate-400 mt-1 ml-1">Email must use @{projectDomain} domain</p>
+              )}
               <Input placeholder="Choose Username" value={form.username} onChange={(v: string) => setForm({...form, username: v})} required icon={<AtSign size={16}/>} />
               <Input type="password" placeholder="Create Password" value={form.password} onChange={(v: string) => setForm({...form, password: v})} required icon={<Lock size={16}/>} />
               <button 

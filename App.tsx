@@ -846,6 +846,20 @@ const App: React.FC = () => {
 
   const handleRegister = async (userData: Partial<User>) => {
     if (!currentProjectId) return;
+    
+    // Get current project domain
+    const activeProject = projects.find(p => p.id === currentProjectId);
+    const projectDomain = activeProject?.domain;
+    
+    // Validate email domain if project has a domain set
+    if (projectDomain && userData.email) {
+      const emailDomain = userData.email.split('@')[1];
+      if (emailDomain !== projectDomain) {
+        alert(`Email must use the project domain: @${projectDomain}\n\nPlease create your email with @${projectDomain}`);
+        return;
+      }
+    }
+    
     try {
       const newUser = await userService.create({
       name: userData.name || 'Unknown',
@@ -1589,6 +1603,7 @@ const App: React.FC = () => {
             onLogout={handleLogout} 
             onRegister={handleRegister}
             needsTwoStep={needsTwoStep}
+            projectDomain={projectDomain}
           />
         </div>
       );
@@ -1615,6 +1630,7 @@ const App: React.FC = () => {
           needsTwoStep={needsTwoStep}
           userPosts={scopedPosts.filter(p => p.userId === currentUser?.id)}
           onDeletePost={handleDeletePost}
+          projectDomain={projectDomain}
         />;
       case 'emails':
         return currentUser ? <EmailsView 

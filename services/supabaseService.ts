@@ -138,6 +138,16 @@ export const userService = {
 };
 
 // Project Operations
+// Helper function to map database project to Project type
+const mapDbProjectToProject = (data: any): Project => ({
+  id: data.id,
+  name: data.name,
+  managerName: data.manager_name || data.managerName,
+  password: data.password,
+  domain: data.domain,
+  createdAt: data.created_at || data.createdAt
+});
+
 export const projectService = {
   async getAll(): Promise<Project[]> {
     const { data, error } = await supabase
@@ -145,7 +155,7 @@ export const projectService = {
       .select('*')
       .order('created_at', { ascending: false });
     if (error) throw error;
-    return data || [];
+    return (data || []).map(mapDbProjectToProject);
   },
 
   async getById(id: string): Promise<Project | null> {
@@ -155,31 +165,42 @@ export const projectService = {
       .eq('id', id)
       .single();
     if (error) return null;
-    return data;
+    return mapDbProjectToProject(data);
   },
 
   async create(project: Omit<Project, 'id' | 'createdAt'>): Promise<Project> {
+    const projectId = 'p_' + Date.now().toString() + Math.random().toString(36).substring(2, 11);
     const { data, error } = await supabase
       .from('projects')
       .insert({
-        ...project,
+        id: projectId,
+        name: project.name,
+        manager_name: project.managerName,
+        password: project.password || null,
+        domain: project.domain || null,
         created_at: new Date().toISOString()
       })
       .select()
       .single();
     if (error) throw error;
-    return data;
+    return mapDbProjectToProject(data);
   },
 
   async update(id: string, updates: Partial<Project>): Promise<Project> {
+    const updateData: any = {};
+    if (updates.name !== undefined) updateData.name = updates.name;
+    if (updates.managerName !== undefined) updateData.manager_name = updates.managerName;
+    if (updates.password !== undefined) updateData.password = updates.password;
+    if (updates.domain !== undefined) updateData.domain = updates.domain;
+    
     const { data, error } = await supabase
       .from('projects')
-      .update(updates)
+      .update(updateData)
       .eq('id', id)
       .select()
       .single();
     if (error) throw error;
-    return data;
+    return mapDbProjectToProject(data);
   },
 
   async delete(id: string): Promise<void> {

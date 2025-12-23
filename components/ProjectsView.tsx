@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { Project } from '../types';
-import { Briefcase, Plus, Shield, User, Key, Trash2, Layout, ArrowRight } from 'lucide-react';
+import { Briefcase, Plus, Shield, User, Key, Trash2, Layout, ArrowRight, Mail } from 'lucide-react';
 
 interface ProjectsViewProps {
   projects: Project[];
@@ -22,14 +22,27 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
   const [name, setName] = useState('');
   const [manager, setManager] = useState('');
   const [password, setPassword] = useState('');
+  const [domain, setDomain] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name || !manager) return;
-    onCreateProject({ name, managerName: manager, password });
+    if (!name || !manager || !domain) {
+      alert('Please fill in all required fields including Mailbox Domain');
+      return;
+    }
+    
+    // Validate domain format (basic validation)
+    const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+    if (!domainRegex.test(domain)) {
+      alert('Please enter a valid domain (e.g., company.com, srj.com)');
+      return;
+    }
+    
+    onCreateProject({ name, managerName: manager, password, domain });
     setName('');
     setManager('');
     setPassword('');
+    setDomain('');
     setIsAdding(false);
   };
 
@@ -91,6 +104,19 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
                 onChange={(e) => setPassword(e.target.value)}
               />
             </div>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-300">
+                <Mail size={14} />
+              </div>
+              <input 
+                className="w-full pl-9 p-3 bg-slate-50 rounded-xl border-2 border-transparent focus:border-orange-500 text-xs font-bold"
+                placeholder="Mailbox Domain (e.g., company.com) *"
+                value={domain}
+                onChange={(e) => setDomain(e.target.value.toLowerCase().trim())}
+                required
+              />
+              <p className="text-[9px] text-slate-400 mt-1 ml-1">Users can only create emails with this domain</p>
+            </div>
           </div>
           <button type="submit" className="w-full py-4 bg-orange-600 text-white font-black uppercase tracking-widest rounded-2xl shadow-md active:scale-95 transition-all">
             Initialize Project
@@ -118,6 +144,12 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({
                 <div>
                   <h3 className="text-sm font-black text-slate-800">{project.name}</h3>
                   <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">ID: {project.id.slice(0,8)}</p>
+                  {project.domain && (
+                    <p className="text-[9px] text-orange-600 font-bold mt-1 flex items-center gap-1">
+                      <Mail size={10} />
+                      @{project.domain}
+                    </p>
+                  )}
                 </div>
               </div>
               <button 

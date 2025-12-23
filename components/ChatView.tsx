@@ -304,11 +304,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
           stopRingtone();
           endCall();
           break;
-        case 'call-ended':
-          // Call ended by other party
-          stopRingtone();
-          endCall();
-          break;
       }
     } catch (error) {
       console.error('Error handling call signal:', error);

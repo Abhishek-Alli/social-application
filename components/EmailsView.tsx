@@ -65,35 +65,63 @@ export const EmailsView: React.FC<EmailsViewProps> = ({
   }, [emails, activeTab, currentUser.id, currentUser.email, searchQuery]);
 
   const processEmailList = (input: string): string[] => {
-    return input.split(',').map(e => e.trim()).filter(e => e !== '').map(e => e.includes('@') ? e : `${e}@${domain}`);
+    return input.split(',').map(e => e.trim()).filter(e => e !== '').map(e => {
+      if (e.includes('@')) {
+        // Validate domain matches project domain
+        const emailDomain = e.split('@')[1];
+        if (emailDomain !== domain) {
+          throw new Error(`Email must use domain @${domain}`);
+        }
+        return e;
+      }
+      return `${e}@${domain}`;
+    });
+  };
+
+  const validateEmailDomain = (email: string): boolean => {
+    if (!email.includes('@')) return true; // Will be auto-appended
+    const emailDomain = email.split('@')[1];
+    return emailDomain === domain;
   };
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
     if (!to || !subject) return;
     
-    const finalTo = to.includes('@') ? to : `${to}@${domain}`;
-    const finalCc = cc ? processEmailList(cc) : undefined;
-    const finalBcc = bcc ? processEmailList(bcc) : undefined;
+    try {
+      // Validate receiver email domain
+      if (to.includes('@')) {
+        if (!validateEmailDomain(to)) {
+          alert(`Email must use the project domain: @${domain}`);
+          return;
+        }
+      }
+      
+      const finalTo = to.includes('@') ? to : `${to}@${domain}`;
+      const finalCc = cc ? processEmailList(cc) : undefined;
+      const finalBcc = bcc ? processEmailList(bcc) : undefined;
 
-    onSendEmail({
-      receiverEmail: finalTo,
-      cc: finalCc,
-      bcc: finalBcc,
-      subject,
-      body,
-      attachments
-    });
+      onSendEmail({
+        receiverEmail: finalTo,
+        cc: finalCc,
+        bcc: finalBcc,
+        subject,
+        body,
+        attachments
+      });
 
-    setIsComposing(false);
-    setTo('');
-    setCc('');
-    setBcc('');
-    setSubject('');
-    setBody('');
-    setAttachments([]);
-    setShowCc(false);
-    setShowBcc(false);
+      setIsComposing(false);
+      setTo('');
+      setCc('');
+      setBcc('');
+      setSubject('');
+      setBody('');
+      setAttachments([]);
+      setShowCc(false);
+      setShowBcc(false);
+    } catch (error: any) {
+      alert(error.message || 'Invalid email domain. All emails must use @' + domain);
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -301,18 +329,19 @@ export const EmailsView: React.FC<EmailsViewProps> = ({
                 </div>
                 <input 
                   className="w-full p-3 bg-slate-50 rounded-xl border-2 border-transparent focus:border-orange-500 text-xs font-bold pr-20 transition-all"
-                  placeholder="To"
+                  placeholder={`To (username or username@${domain})`}
                   value={to}
                   onChange={(e) => setTo(e.target.value)}
                   required
                 />
+                <p className="text-[9px] text-slate-400 mt-1 ml-1">All emails must use @{domain} domain</p>
               </div>
 
               {showCc && (
                 <div className="animate-in slide-in-from-top-2 duration-200">
                   <input 
                     className="w-full p-3 bg-slate-50 rounded-xl border-2 border-transparent focus:border-orange-500 text-xs font-bold transition-all"
-                    placeholder="Cc (comma separated)"
+                    placeholder={`Cc (username or username@${domain}, comma separated)`}
                     value={cc}
                     onChange={(e) => setCc(e.target.value)}
                   />
@@ -323,7 +352,7 @@ export const EmailsView: React.FC<EmailsViewProps> = ({
                 <div className="animate-in slide-in-from-top-2 duration-200">
                   <input 
                     className="w-full p-3 bg-slate-50 rounded-xl border-2 border-transparent focus:border-orange-500 text-xs font-bold transition-all"
-                    placeholder="Bcc (comma separated)"
+                    placeholder={`Bcc (username or username@${domain}, comma separated)`}
                     value={bcc}
                     onChange={(e) => setBcc(e.target.value)}
                   />
