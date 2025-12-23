@@ -533,6 +533,7 @@ export const messageService = {
     if (updates.groupId) updateData.group_id = updates.groupId;
     if (updates.replyToId) updateData.reply_to_id = updates.replyToId;
     if (updates.callInfo) updateData.call_info = updates.callInfo;
+    if (updates.status) updateData.status = updates.status;
     
     const { data, error } = await supabase
       .from('messages')
@@ -541,7 +542,22 @@ export const messageService = {
       .select()
       .single();
     if (error) throw error;
-    return data;
+    
+    // Map response back to Message type
+    return {
+      id: data.id,
+      projectId: data.project_id || data.projectId,
+      senderId: data.sender_id || data.senderId,
+      receiverId: data.receiver_id || data.receiverId,
+      groupId: data.group_id || data.groupId,
+      text: data.text,
+      attachment: data.attachment,
+      callInfo: data.call_info || data.callInfo,
+      status: data.status || 'sent',
+      replyToId: data.reply_to_id || data.replyToId,
+      mentions: data.mentions || [],
+      createdAt: data.created_at || data.createdAt
+    };
   },
 
   async delete(id: string): Promise<void> {

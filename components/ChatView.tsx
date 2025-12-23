@@ -3,6 +3,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { User, Message, Group, Role, MessageAttachment, CallInfo } from '../types';
 import { WebRTCService } from '../services/webrtcService';
 import { supabase } from '../services/supabaseService';
+import { messageService } from '../services/supabaseService';
 import { 
   Search, Send, ArrowLeft, User as UserIcon, MessageCircle, 
   Users, Plus, Hash, Trash2, Paperclip, Video, Phone, 
@@ -50,6 +51,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const [isCallActive, setIsCallActive] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+  const [typingUsers, setTypingUsers] = useState<{ [key: string]: string }>({}); // userId -> userName
+  const [isTyping, setIsTyping] = useState(false);
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -59,6 +62,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const signalingChannelRef = useRef<any>(null);
   const ringtoneRef = useRef<HTMLAudioElement | null>(null);
   const ringtoneIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const typingChannelRef = useRef<any>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastTypingTimeRef = useRef<number>(0);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -87,6 +93,100 @@ export const ChatView: React.FC<ChatViewProps> = ({
       supabase.removeChannel(channel);
     };
   }, [currentUser]);
+
+  // Set up typing indicators
+  useEffect(() => {
+    if (!currentUser || (!activeChatUser && !activeGroup)) {
+      if (typingChannelRef.current) {
+        supabase.removeChannel(typingChannelRef.current);
+        typingChannelRef.current = null;
+      }
+      return;
+    }
+
+    const targetId = activeChatUser?.id || activeGroup?.id;
+    const channelName = activeGroup ? `typing_group_${targetId}` : `typing_dm_${currentUser.id}_${targetId}`;
+    
+    const typingChannel = supabase.channel(channelName)
+      .on('broadcast', { event: 'typing' }, (payload) => {
+        const { userId, userName, isTyping: userIsTyping } = payload.payload;
+        if (userId !== currentUser.id) {
+          if (userIsTyping) {
+            setTypingUsers(prev => ({ ...prev, [userId]: userName }));
+            // Clear typing indicator after 3 seconds
+            setTimeout(() => {
+              setTypingUsers(prev => {
+                const updated = { ...prev };
+                delete updated[userId];
+                return updated;
+              });
+            }, 3000);
+          } else {
+            setTypingUsers(prev => {
+              const updated = { ...prev };
+              delete updated[userId];
+              return updated;
+            });
+          }
+        }
+      })
+      .subscribe();
+
+    typingChannelRef.current = typingChannel;
+
+    return () => {
+      if (typingChannelRef.current) {
+        supabase.removeChannel(typingChannelRef.current);
+        typingChannelRef.current = null;
+      }
+      setTypingUsers({});
+    };
+  }, [currentUser, activeChatUser?.id, activeGroup?.id]);
+
+  // Mark messages as seen when viewing conversation
+  useEffect(() => {
+    if (!currentUser || (!activeChatUser && !activeGroup)) return;
+
+    const markMessagesAsSeen = async () => {
+      const targetId = activeChatUser?.id || activeGroup?.id;
+      if (!targetId) return;
+
+      // Find unread messages sent to current user (for direct messages)
+      // Or messages in group where current user is a member
+      const unreadMessages = conversationMessages.filter(msg => {
+        if (activeChatUser) {
+          // Direct message - mark as seen if I'm the receiver
+          return msg.receiverId === currentUser.id && 
+                 msg.status !== 'seen' &&
+                 msg.senderId === targetId;
+        } else if (activeGroup) {
+          // Group message - mark as seen if I'm not the sender and status is not 'seen'
+          return msg.groupId === targetId &&
+                 msg.senderId !== currentUser.id &&
+                 msg.status !== 'seen';
+        }
+        return false;
+      });
+
+      if (unreadMessages.length > 0) {
+        // Update all unread messages to 'seen'
+        for (const msg of unreadMessages) {
+          try {
+            await messageService.update(msg.id, { status: 'seen' });
+          } catch (error) {
+            console.error('Failed to mark message as seen:', error);
+          }
+        }
+      }
+    };
+
+    // Add a small delay to ensure messages are rendered before marking as seen
+    const timeoutId = setTimeout(() => {
+      markMessagesAsSeen();
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [currentUser?.id, activeChatUser?.id, activeGroup?.id, conversationMessages]);
 
   // Update video streams when WebRTC streams are available
   useEffect(() => {
@@ -307,9 +407,64 @@ export const ChatView: React.FC<ChatViewProps> = ({
     }
   };
 
+  // Send typing indicator
+  const sendTypingIndicator = (isTyping: boolean) => {
+    if (!typingChannelRef.current || !currentUser) return;
+    
+    const targetId = activeChatUser?.id || activeGroup?.id;
+    if (!targetId) return;
+
+    typingChannelRef.current.send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: {
+        userId: currentUser.id,
+        userName: currentUser.name,
+        isTyping
+      }
+    });
+  };
+
+  // Handle typing in message input
+  const handleMessageChange = (value: string) => {
+    setMessageText(value);
+    
+    const now = Date.now();
+    // Throttle typing indicators (send every 2 seconds)
+    if (now - lastTypingTimeRef.current > 2000) {
+      if (value.trim().length > 0 && !isTyping) {
+        setIsTyping(true);
+        sendTypingIndicator(true);
+        lastTypingTimeRef.current = now;
+      }
+    }
+
+    // Clear typing indicator after user stops typing for 2 seconds
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    
+    typingTimeoutRef.current = setTimeout(() => {
+      if (isTyping) {
+        setIsTyping(false);
+        sendTypingIndicator(false);
+      }
+    }, 2000);
+  };
+
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
     if (!messageText.trim() && !attachment) return;
+    
+    // Stop typing indicator
+    if (isTyping) {
+      setIsTyping(false);
+      sendTypingIndicator(false);
+    }
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    
     const receiverId = activeChatUser?.id;
     const groupId = activeGroup?.id;
     onSendMessage(receiverId, groupId, messageText.trim(), attachment || undefined, replyingTo?.id);
@@ -737,7 +892,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
       case 'delivered':
         return <CheckCheck size={10} className="text-white opacity-60" />;
       case 'seen':
-        return <CheckCheck size={10} className="text-blue-300" />;
+        return <CheckCheck size={10} className="text-blue-400" />;
       default:
         return null;
     }
@@ -1001,6 +1156,22 @@ export const ChatView: React.FC<ChatViewProps> = ({
               </div>
             );
           })}
+          
+          {/* Typing Indicator */}
+          {Object.keys(typingUsers).length > 0 && (
+            <div className="flex items-center gap-2 text-slate-400 animate-pulse">
+              <div className="flex gap-1 px-3 py-2 bg-white border border-slate-100 rounded-2xl">
+                <span className="text-[10px] font-bold">
+                  {Object.values(typingUsers).join(', ')} {Object.keys(typingUsers).length === 1 ? 'is' : 'are'} typing
+                </span>
+                <span className="flex items-center gap-0.5">
+                  <span className="w-1 h-1 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                  <span className="w-1 h-1 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                  <span className="w-1 h-1 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                </span>
+              </div>
+            </div>
+          )}
         </div>
 
         {replyingTo && (
@@ -1097,7 +1268,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
               className="w-full bg-transparent p-3 text-sm focus:ring-0"
               placeholder="Type your message..."
               value={messageText}
-              onChange={(e) => setMessageText(e.target.value)}
+              onChange={(e) => handleMessageChange(e.target.value)}
             />
           </div>
           <button type="submit" className="p-3 bg-orange-600 text-white rounded-xl active:scale-95 transition-all">

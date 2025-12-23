@@ -416,16 +416,27 @@ const App: React.FC = () => {
               }]);
             } else if (payload.eventType === 'UPDATE') {
               const updatedMessage = payload.new as any;
-              setMessages(prev => prev.map(m => m.id === updatedMessage.id ? {
-                ...updatedMessage,
-                projectId: updatedMessage.project_id || updatedMessage.projectId,
-                senderId: updatedMessage.sender_id || updatedMessage.senderId,
-                receiverId: updatedMessage.receiver_id || updatedMessage.receiverId,
-                groupId: updatedMessage.group_id || updatedMessage.groupId,
-                replyToId: updatedMessage.reply_to_id || updatedMessage.replyToId,
-                callInfo: updatedMessage.call_info || updatedMessage.callInfo,
-                createdAt: updatedMessage.created_at || updatedMessage.createdAt
-              } : m));
+              setMessages(prev => prev.map(m => {
+                if (m.id === updatedMessage.id) {
+                  // Preserve existing message data and merge with updated fields
+                  return {
+                    ...m,
+                    id: updatedMessage.id,
+                    projectId: updatedMessage.project_id || updatedMessage.projectId || m.projectId,
+                    senderId: updatedMessage.sender_id || updatedMessage.senderId || m.senderId,
+                    receiverId: updatedMessage.receiver_id !== undefined ? updatedMessage.receiver_id : m.receiverId,
+                    groupId: updatedMessage.group_id !== undefined ? updatedMessage.group_id : m.groupId,
+                    text: updatedMessage.text !== undefined ? updatedMessage.text : m.text,
+                    attachment: updatedMessage.attachment !== undefined ? updatedMessage.attachment : m.attachment,
+                    callInfo: updatedMessage.call_info !== undefined ? updatedMessage.call_info : m.callInfo,
+                    status: updatedMessage.status || m.status || 'sent',
+                    replyToId: updatedMessage.reply_to_id !== undefined ? updatedMessage.reply_to_id : m.replyToId,
+                    mentions: updatedMessage.mentions || m.mentions || [],
+                    createdAt: updatedMessage.created_at || updatedMessage.createdAt || m.createdAt
+                  };
+                }
+                return m;
+              }));
             } else if (payload.eventType === 'DELETE') {
               setMessages(prev => prev.filter(m => m.id !== payload.old.id));
             }
