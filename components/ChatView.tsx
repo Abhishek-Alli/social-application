@@ -62,6 +62,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const signalingChannelRef = useRef<any>(null);
   const ringtoneRef = useRef<HTMLAudioElement | null>(null);
   const ringtoneIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [showPermissionModal, setShowPermissionModal] = useState(false);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
   const typingChannelRef = useRef<any>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastTypingTimeRef = useRef<number>(0);
@@ -143,51 +145,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
     };
   }, [currentUser, activeChatUser?.id, activeGroup?.id]);
 
-  // Mark messages as seen when viewing conversation
-  useEffect(() => {
-    if (!currentUser || (!activeChatUser && !activeGroup)) return;
-
-    const markMessagesAsSeen = async () => {
-      const targetId = activeChatUser?.id || activeGroup?.id;
-      if (!targetId) return;
-
-      // Find unread messages sent to current user (for direct messages)
-      // Or messages in group where current user is a member
-      const unreadMessages = conversationMessages.filter(msg => {
-        if (activeChatUser) {
-          // Direct message - mark as seen if I'm the receiver
-          return msg.receiverId === currentUser.id && 
-                 msg.status !== 'seen' &&
-                 msg.senderId === targetId;
-        } else if (activeGroup) {
-          // Group message - mark as seen if I'm not the sender and status is not 'seen'
-          return msg.groupId === targetId &&
-                 msg.senderId !== currentUser.id &&
-                 msg.status !== 'seen';
-        }
-        return false;
-      });
-
-      if (unreadMessages.length > 0) {
-        // Update all unread messages to 'seen'
-        for (const msg of unreadMessages) {
-          try {
-            await messageService.update(msg.id, { status: 'seen' });
-          } catch (error) {
-            console.error('Failed to mark message as seen:', error);
-          }
-        }
-      }
-    };
-
-    // Add a small delay to ensure messages are rendered before marking as seen
-    const timeoutId = setTimeout(() => {
-      markMessagesAsSeen();
-    }, 500);
-
-    return () => clearTimeout(timeoutId);
-  }, [currentUser?.id, activeChatUser?.id, activeGroup?.id, conversationMessages]);
-
   // Update video streams when WebRTC streams are available
   useEffect(() => {
     if (webrtcRef.current && localVideoRef.current) {
@@ -222,39 +179,49 @@ export const ChatView: React.FC<ChatViewProps> = ({
     }
   };
 
-  // Play ringing sound
+  // Initialize audio element for ringtone
+  useEffect(() => {
+    if (!ringtoneRef.current) {
+      // Try multiple possible paths for the ringtone file
+      const audioPaths = [
+        '/app_logo/ringtone.wav',  // If in public/app_logo
+        './app_logo/ringtone.wav', // Alternative path
+        'app_logo/ringtone.wav'    // Relative path
+      ];
+      
+      let audio: HTMLAudioElement | null = null;
+      for (const path of audioPaths) {
+        try {
+          audio = new Audio(path);
+          audio.loop = true;
+          audio.volume = 0.7;
+          // Preload the audio
+          audio.preload = 'auto';
+          ringtoneRef.current = audio;
+          console.log(`✅ Ringtone loaded from: ${path}`);
+          break;
+        } catch (e) {
+          console.warn(`Failed to load ringtone from ${path}:`, e);
+        }
+      }
+      
+      if (!audio) {
+        console.error('❌ Could not load ringtone file. Please ensure ringtone.wav is in the public/app_logo folder.');
+      }
+    }
+  }, []);
+
+  // Play ringing sound using audio file
   const playRingtone = () => {
-    // Create a simple ringtone using Web Audio API
-    if (ringtoneIntervalRef.current) return; // Already playing
+    if (ringtoneIntervalRef.current || !ringtoneRef.current) return; // Already playing
     
     try {
-      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-      
-      const playTone = () => {
-        try {
-          const oscillator = audioContext.createOscillator();
-          const gainNode = audioContext.createGain();
-          
-          oscillator.connect(gainNode);
-          gainNode.connect(audioContext.destination);
-          
-          oscillator.frequency.value = 800;
-          oscillator.type = 'sine';
-          gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-          gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
-          
-          oscillator.start(audioContext.currentTime);
-          oscillator.stop(audioContext.currentTime + 0.5);
-        } catch (error) {
-          console.warn('Error playing ringtone tone:', error);
-        }
-      };
-      
-      // Play tone twice per second
-      playTone();
-      ringtoneIntervalRef.current = setInterval(() => {
-        playTone();
-      }, 1000);
+      if (ringtoneRef.current) {
+        ringtoneRef.current.currentTime = 0; // Reset to start
+        ringtoneRef.current.play().catch(error => {
+          console.warn('Error playing ringtone:', error);
+        });
+      }
     } catch (error) {
       console.warn('Error initializing ringtone:', error);
     }
@@ -262,6 +229,10 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
   // Stop ringing sound
   const stopRingtone = () => {
+    if (ringtoneRef.current) {
+      ringtoneRef.current.pause();
+      ringtoneRef.current.currentTime = 0;
+    }
     if (ringtoneIntervalRef.current) {
       clearInterval(ringtoneIntervalRef.current);
       ringtoneIntervalRef.current = null;
@@ -376,6 +347,51 @@ export const ChatView: React.FC<ChatViewProps> = ({
     }
     return [];
   }, [messages, activeChatUser, activeGroup, currentUser.id]);
+
+  // Mark messages as seen when viewing conversation (must be after conversationMessages definition)
+  useEffect(() => {
+    if (!currentUser || (!activeChatUser && !activeGroup)) return;
+
+    const markMessagesAsSeen = async () => {
+      const targetId = activeChatUser?.id || activeGroup?.id;
+      if (!targetId) return;
+
+      // Find unread messages sent to current user (for direct messages)
+      // Or messages in group where current user is a member
+      const unreadMessages = conversationMessages.filter(msg => {
+        if (activeChatUser) {
+          // Direct message - mark as seen if I'm the receiver
+          return msg.receiverId === currentUser.id && 
+                 msg.status !== 'seen' &&
+                 msg.senderId === targetId;
+        } else if (activeGroup) {
+          // Group message - mark as seen if I'm not the sender and status is not 'seen'
+          return msg.groupId === targetId &&
+                 msg.senderId !== currentUser.id &&
+                 msg.status !== 'seen';
+        }
+        return false;
+      });
+
+      if (unreadMessages.length > 0) {
+        // Update all unread messages to 'seen'
+        for (const msg of unreadMessages) {
+          try {
+            await messageService.update(msg.id, { status: 'seen' });
+          } catch (error) {
+            console.error('Failed to mark message as seen:', error);
+          }
+        }
+      }
+    };
+
+    // Add a small delay to ensure messages are rendered before marking as seen
+    const timeoutId = setTimeout(() => {
+      markMessagesAsSeen();
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [currentUser, activeChatUser, activeGroup, conversationMessages]);
 
   const myGroups = useMemo(() => {
     return groups.filter(g => g.members.includes(currentUser.id));
@@ -502,9 +518,13 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
     // If permissions are denied, show helpful message
     if (cameraStatus === 'denied' && isVideo) {
+      setPermissionError('CAMERA_DENIED');
+      setShowPermissionModal(true);
       throw new Error('CAMERA_DENIED');
     }
     if (micStatus === 'denied') {
+      setPermissionError('MICROPHONE_DENIED');
+      setShowPermissionModal(true);
       throw new Error('MICROPHONE_DENIED');
     }
 
@@ -535,7 +555,31 @@ export const ChatView: React.FC<ChatViewProps> = ({
         };
         return await navigator.mediaDevices.getUserMedia(constraints);
       }
+      
+      // Handle permission errors
+      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        setPermissionError(error.name);
+        setShowPermissionModal(true);
+      }
       throw error;
+    }
+  };
+
+  // Request permissions manually
+  const handleRequestPermissions = async (isVideo: boolean) => {
+    setShowPermissionModal(false);
+    setPermissionError(null);
+    try {
+      const stream = await requestMediaPermissions(isVideo);
+      stream.getTracks().forEach(track => track.stop());
+      // Retry the call
+      if (isVideo) {
+        handleCall('video');
+      } else {
+        handleCall('audio');
+      }
+    } catch (error) {
+      console.error('Permission request failed:', error);
     }
   };
 
@@ -910,6 +954,157 @@ export const ChatView: React.FC<ChatViewProps> = ({
       return <span key={i}>{part}</span>;
     });
   };
+
+  // Permission Modal
+  if (showPermissionModal) {
+    const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
+    const isFirefox = /Firefox/.test(navigator.userAgent);
+    const isSafari = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent);
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    
+    return (
+      <div className="fixed inset-0 z-[200] bg-slate-900/95 backdrop-blur-sm flex items-center justify-center p-6">
+        <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl animate-in zoom-in">
+          <div className="text-center mb-6">
+            <div className="w-16 h-16 bg-orange-100 rounded-full mx-auto flex items-center justify-center mb-4">
+              <Camera size={32} className="text-orange-600" />
+            </div>
+            <h2 className="text-xl font-bold text-slate-800 mb-2">Camera & Microphone Access Required</h2>
+            <p className="text-sm text-slate-600">To make calls, we need access to your camera and microphone.</p>
+          </div>
+
+          <div className="bg-slate-50 rounded-xl p-4 mb-6">
+            <h3 className="font-bold text-sm text-slate-800 mb-3">How to Allow Permissions:</h3>
+            
+            {isMobile ? (
+              <div className="space-y-3 text-xs text-slate-700">
+                {isChrome || (isMobile && !isSafari) ? (
+                  <>
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-orange-600">1.</span>
+                      <p>Look for the permission popup at the top or bottom of your screen</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-orange-600">2.</span>
+                      <p>Tap <strong>"Allow"</strong> or <strong>"Allow access"</strong></p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-orange-600">3.</span>
+                      <p>If you don't see the popup, check your browser settings</p>
+                    </div>
+                  </>
+                ) : isSafari ? (
+                  <>
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-orange-600">1.</span>
+                      <p>Tap the <strong>AA</strong> icon in the address bar</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-orange-600">2.</span>
+                      <p>Select <strong>"Website Settings"</strong></p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-orange-600">3.</span>
+                      <p>Enable <strong>"Camera"</strong> and <strong>"Microphone"</strong></p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-orange-600">1.</span>
+                      <p>Look for the permission popup</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-orange-600">2.</span>
+                      <p>Tap <strong>"Allow"</strong></p>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3 text-xs text-slate-700">
+                {isChrome ? (
+                  <>
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-orange-600">1.</span>
+                      <p>Look for the <strong>camera/microphone icon</strong> in the address bar (left side)</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-orange-600">2.</span>
+                      <p>Click it and select <strong>"Always allow"</strong> for camera and microphone</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-orange-600">3.</span>
+                      <p>Or go to: <strong>Settings → Privacy → Site Settings → Camera/Microphone</strong></p>
+                    </div>
+                  </>
+                ) : isFirefox ? (
+                  <>
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-orange-600">1.</span>
+                      <p>Look for the permission popup in the address bar</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-orange-600">2.</span>
+                      <p>Click <strong>"Allow"</strong> for camera and microphone</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-orange-600">3.</span>
+                      <p>Or go to: <strong>Preferences → Privacy → Permissions → Camera/Microphone</strong></p>
+                    </div>
+                  </>
+                ) : isSafari ? (
+                  <>
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-orange-600">1.</span>
+                      <p>Go to: <strong>Safari → Preferences → Websites</strong></p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-orange-600">2.</span>
+                      <p>Select <strong>"Camera"</strong> and <strong>"Microphone"</strong></p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-orange-600">3.</span>
+                      <p>Set this website to <strong>"Allow"</strong></p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-orange-600">1.</span>
+                      <p>Look for the permission popup in your browser</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-orange-600">2.</span>
+                      <p>Click <strong>"Allow"</strong> for camera and microphone</p>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => {
+                setShowPermissionModal(false);
+                setPermissionError(null);
+              }}
+              className="flex-1 py-3 px-4 bg-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-300 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => handleRequestPermissions(permissionError === 'CAMERA_DENIED' || permissionError?.includes('video'))}
+              className="flex-1 py-3 px-4 bg-orange-600 text-white font-bold rounded-xl hover:bg-orange-700 transition-colors"
+            >
+              Try Again
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Incoming call UI
   if (incomingCall) {
