@@ -108,7 +108,8 @@ export interface Post {
   userName: string;
   userUsername: string;
   text: string;
-  image?: string;
+  image?: string; // Deprecated: use images array instead, kept for backward compatibility
+  images?: string[]; // Array of image URLs/data URLs
   video?: string;
   ratio: '3:4' | '16:9' | '1:1';
   likes: string[]; // User IDs
@@ -164,6 +165,7 @@ export interface Complaint {
   status: 'pending' | 'resolved';
   createdAt: string;
   attachment?: ComplaintAttachment;
+  targetUserId?: string; // ID of the management user this complaint is directed to
 }
 
 export interface Notification {
@@ -172,7 +174,7 @@ export interface Notification {
   userId: string;
   title: string;
   message: string;
-  type: 'task' | 'complaint' | 'update' | 'call' | 'message' | 'post' | 'group' | 'note' | 'email' | 'like' | 'comment';
+  type: 'task' | 'complaint' | 'update' | 'call' | 'message' | 'post' | 'group' | 'note' | 'email' | 'like' | 'comment' | 'calendar';
   read: boolean;
   createdAt: string;
   linkTo?: ViewType;

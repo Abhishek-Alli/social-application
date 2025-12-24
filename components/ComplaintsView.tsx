@@ -1,18 +1,20 @@
 
 import React, { useState, useRef, useMemo } from 'react';
 import { User, Role, Complaint, ComplaintAttachment } from '../types';
-import { Megaphone, MessageSquare, Send, CheckCircle, Clock, AlertCircle, Paperclip, X, FileText, Image as ImageIcon, ExternalLink, Search } from 'lucide-react';
+import { Megaphone, MessageSquare, Send, CheckCircle, Clock, AlertCircle, Paperclip, X, FileText, Image as ImageIcon, ExternalLink, Search, Download } from 'lucide-react';
 
 interface ComplaintsViewProps {
   currentUser: User;
   complaints: Complaint[];
-  onSubmitComplaint: (subject: string, message: string, attachment?: ComplaintAttachment) => void;
+  allUsers: User[];
+  onSubmitComplaint: (subject: string, message: string, targetUserId: string, attachment?: ComplaintAttachment) => void;
   onResolveComplaint: (id: string) => void;
 }
 
 export const ComplaintsView: React.FC<ComplaintsViewProps> = ({ 
   currentUser, 
   complaints, 
+  allUsers,
   onSubmitComplaint, 
   onResolveComplaint 
 }) => {
@@ -21,12 +23,24 @@ export const ComplaintsView: React.FC<ComplaintsViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
+  const [targetUserId, setTargetUserId] = useState<string>('');
   const [attachment, setAttachment] = useState<ComplaintAttachment | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isManagement = currentUser.role === Role.ADMIN || 
                        currentUser.role === Role.MANAGEMENT || 
                        currentUser.role === Role.HOD;
+
+  // Check if user can file complaints (HOD or users in hierarchy)
+  const canFileComplaint = currentUser.role === Role.HOD || currentUser.parentId !== null;
+
+  // Get management users for selection
+  const managementUsers = useMemo(() => {
+    return allUsers.filter(u => 
+      u.role === Role.MANAGEMENT && 
+      u.projectId === currentUser.projectId
+    );
+  }, [allUsers, currentUser.projectId]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -54,18 +68,58 @@ export const ComplaintsView: React.FC<ComplaintsViewProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!subject || !message) return;
-    onSubmitComplaint(subject, message, attachment || undefined);
+    if (!subject || !message || !targetUserId) {
+      alert('Please select a management user to send the complaint to.');
+      return;
+    }
+    onSubmitComplaint(subject, message, targetUserId, attachment || undefined);
     setSubject('');
     setMessage('');
+    setTargetUserId('');
     setAttachment(null);
     setIsFiling(false);
   };
 
   const openAttachment = (att: ComplaintAttachment) => {
-    const win = window.open();
-    if (win) {
-      win.document.write(`<iframe src="${att.data}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
+    // For PDFs, open in new tab for viewing
+    if (att.type === 'application/pdf' || att.name.toLowerCase().endsWith('.pdf')) {
+      const win = window.open();
+      if (win) {
+        win.document.write(`<iframe src="${att.data}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
+      }
+    } else if (att.type.startsWith('image/')) {
+      // For images, open in new tab
+      const win = window.open();
+      if (win) {
+        win.document.write(`<img src="${att.data}" style="max-width:100%; height:auto;" />`);
+      }
+    } else {
+      // For other files, try to open
+      const win = window.open();
+      if (win) {
+        win.document.write(`<iframe src="${att.data}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
+      }
+    }
+  };
+
+  const downloadAttachment = async (att: ComplaintAttachment) => {
+    try {
+      // Convert data URL to blob
+      const response = await fetch(att.data);
+      const blob = await response.blob();
+      
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = att.name;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Failed to download attachment:', error);
+      alert('Failed to download file. Please try again.');
     }
   };
 
@@ -98,7 +152,7 @@ export const ComplaintsView: React.FC<ComplaintsViewProps> = ({
           >
             <Search size={18} />
           </button>
-          {!isManagement && !isFiling && (
+          {canFileComplaint && !isFiling && (
             <button 
               onClick={() => setIsFiling(true)}
               className="px-4 py-2 bg-orange-600 text-white text-xs font-bold rounded-xl shadow-md shadow-orange-100 flex items-center gap-2"
@@ -128,6 +182,27 @@ export const ComplaintsView: React.FC<ComplaintsViewProps> = ({
             <h3 className="text-sm font-bold text-slate-800">Write Complaint</h3>
             <button type="button" onClick={() => setIsFiling(false)} className="text-xs text-slate-400 font-bold hover:text-rose-500 transition-colors">Cancel</button>
           </div>
+          
+          {managementUsers.length > 0 && (
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Send To Management User *</label>
+              <select
+                className="w-full p-3 bg-slate-50 rounded-xl border-2 border-transparent focus:border-orange-500 text-sm font-medium transition-all"
+                value={targetUserId}
+                onChange={(e) => setTargetUserId(e.target.value)}
+                required
+              >
+                <option value="">Select a management user...</option>
+                {managementUsers.map(user => (
+                  <option key={user.id} value={user.id}>
+                    {user.name} (@{user.username})
+                  </option>
+                ))}
+              </select>
+              <p className="text-[10px] text-slate-400 mt-1">Select the management user you want to address this complaint to</p>
+            </div>
+          )}
+
           <div>
             <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Subject</label>
             <input 
@@ -199,7 +274,14 @@ export const ComplaintsView: React.FC<ComplaintsViewProps> = ({
                   </div>
                   <div>
                     <h4 className="text-sm font-bold text-slate-800 leading-tight">{complaint.subject}</h4>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase mt-0.5">By {complaint.userName} • {new Date(complaint.createdAt).toLocaleDateString()}</p>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase mt-0.5">
+                      By {complaint.userName} 
+                      {complaint.targetUserId && (() => {
+                        const targetUser = allUsers.find(u => u.id === complaint.targetUserId);
+                        return targetUser ? ` → To ${targetUser.name}` : '';
+                      })()}
+                      {' • '}{new Date(complaint.createdAt).toLocaleDateString()}
+                    </p>
                   </div>
                 </div>
                 <div className="flex flex-col items-end gap-2">
@@ -223,17 +305,30 @@ export const ComplaintsView: React.FC<ComplaintsViewProps> = ({
                 </p>
                 
                 {complaint.attachment && (
-                  <div className="mt-4 p-2 bg-white rounded-xl border border-slate-100 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <FileText size={14} className="text-slate-400" />
-                      <span className="text-[10px] font-bold text-slate-500 truncate max-w-[180px]">{complaint.attachment.name}</span>
+                  <div className="mt-4 p-3 bg-white rounded-xl border border-slate-100">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <FileText size={14} className="text-slate-400" />
+                        <span className="text-[10px] font-bold text-slate-500 truncate max-w-[180px]">{complaint.attachment.name}</span>
+                        {(complaint.attachment.type === 'application/pdf' || complaint.attachment.name.toLowerCase().endsWith('.pdf')) && (
+                          <span className="text-[9px] px-1.5 py-0.5 bg-rose-100 text-rose-700 rounded font-bold uppercase">PDF</span>
+                        )}
+                      </div>
                     </div>
-                    <button 
-                      onClick={() => openAttachment(complaint.attachment!)}
-                      className="flex items-center gap-1 text-[10px] font-bold text-orange-600 hover:text-orange-700"
-                    >
-                      View <ExternalLink size={12} />
-                    </button>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => openAttachment(complaint.attachment!)}
+                        className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-[10px] font-bold text-orange-600 hover:text-orange-700 hover:bg-orange-50 rounded-lg transition-colors"
+                      >
+                        <ExternalLink size={12} /> View
+                      </button>
+                      <button 
+                        onClick={() => downloadAttachment(complaint.attachment!)}
+                        className="flex-1 flex items-center justify-center gap-1 px-3 py-2 text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors"
+                      >
+                        <Download size={12} /> Download
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

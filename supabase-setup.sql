@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS posts (
   user_username TEXT NOT NULL,
   text TEXT NOT NULL,
   image TEXT,
+  images JSONB DEFAULT '[]'::jsonb,
   video TEXT,
   ratio TEXT,
   likes JSONB DEFAULT '[]'::jsonb,

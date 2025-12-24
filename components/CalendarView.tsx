@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { CalendarEvent, User } from '../types';
 import { 
   Calendar, ChevronLeft, ChevronRight, Plus, 
@@ -29,6 +29,16 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const [isCreatingEvent, setIsCreatingEvent] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [view, setView] = useState<'month' | 'day'>('month');
+  const [showTodaysEvents, setShowTodaysEvents] = useState(true);
+
+  // Debug: Log events when they change
+  useEffect(() => {
+    console.log('CalendarView - Total events:', events.length);
+    if (events.length > 0) {
+      console.log('CalendarView - Sample event:', events[0]);
+      console.log('CalendarView - All events:', events);
+    }
+  }, [events]);
 
   // Event form state
   const [eventTitle, setEventTitle] = useState('');
@@ -41,6 +51,20 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const [eventAttendees, setEventAttendees] = useState<string[]>([]);
   const [eventColor, setEventColor] = useState('#f97316'); // Default orange
   const [allDay, setAllDay] = useState(false);
+  const [attendeeSearch, setAttendeeSearch] = useState('');
+  const [showAttendeeDropdown, setShowAttendeeDropdown] = useState(false);
+  const attendeeDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (attendeeDropdownRef.current && !attendeeDropdownRef.current.contains(event.target as Node)) {
+        setShowAttendeeDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const colors = ['#f97316', '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#f59e0b', '#ef4444'];
 
@@ -70,19 +94,54 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   };
 
   const getEventsForDate = (date: Date): CalendarEvent[] => {
-    const dateStr = date.toISOString().split('T')[0];
-    return events.filter(event => {
-      const eventStart = new Date(event.startDate).toISOString().split('T')[0];
-      const eventEnd = new Date(event.endDate).toISOString().split('T')[0];
+    // Get date string in YYYY-MM-DD format using local timezone
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${day}`;
+    
+    const filteredEvents = events.filter(event => {
+      // Filter: show events where user is creator OR is in attendees list
+      const isCreator = event.userId === currentUser.id;
+      const isAttendee = event.attendees && event.attendees.includes(currentUser.id);
+      
+      if (!isCreator && !isAttendee) return false;
+      
+      if (!event.startDate || !event.endDate) return false;
+      
+      // Parse event dates and get date strings in YYYY-MM-DD format
+      const eventStartDate = new Date(event.startDate);
+      const eventEndDate = new Date(event.endDate);
+      
+      // Handle invalid dates
+      if (isNaN(eventStartDate.getTime()) || isNaN(eventEndDate.getTime())) {
+        console.warn('Invalid date in event:', event);
+        return false;
+      }
+      
+      const eventStartYear = eventStartDate.getFullYear();
+      const eventStartMonth = String(eventStartDate.getMonth() + 1).padStart(2, '0');
+      const eventStartDay = String(eventStartDate.getDate()).padStart(2, '0');
+      const eventStart = `${eventStartYear}-${eventStartMonth}-${eventStartDay}`;
+      
+      const eventEndYear = eventEndDate.getFullYear();
+      const eventEndMonth = String(eventEndDate.getMonth() + 1).padStart(2, '0');
+      const eventEndDay = String(eventEndDate.getDate()).padStart(2, '0');
+      const eventEnd = `${eventEndYear}-${eventEndMonth}-${eventEndDay}`;
+      
+      // Check if the date falls within the event's date range
       return dateStr >= eventStart && dateStr <= eventEnd;
     });
+    
+    return filteredEvents;
   };
 
   const handleDateClick = (day: number) => {
     const clickedDate = new Date(year, month, day);
     setSelectedDate(clickedDate);
     setIsCreatingEvent(true);
-    const dateStr = clickedDate.toISOString().split('T')[0];
+    // Format date as YYYY-MM-DD for input field (using local timezone)
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     setEventStartDate(dateStr);
     setEventEndDate(dateStr);
     setEventStartTime('09:00');
@@ -186,8 +245,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     setEventDescription(event.description || '');
     const start = new Date(event.startDate);
     const end = new Date(event.endDate);
-    setEventStartDate(start.toISOString().split('T')[0]);
-    setEventEndDate(end.toISOString().split('T')[0]);
+    // Format dates using local timezone to avoid timezone conversion issues
+    const startDateStr = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
+    const endDateStr = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
+    setEventStartDate(startDateStr);
+    setEventEndDate(endDateStr);
     setEventStartTime(event.allDay ? '09:00' : start.toTimeString().slice(0, 5));
     setEventEndTime(event.allDay ? '10:00' : end.toTimeString().slice(0, 5));
     setEventLocation(event.location || '');
@@ -221,24 +283,27 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           onClick={() => handleDateClick(day)}
           className={`aspect-square p-1 cursor-pointer group ${isSelected ? 'ring-2 ring-orange-500' : ''}`}
         >
-          <div className={`h-full rounded-lg p-2 flex flex-col ${isToday ? 'bg-orange-50 border-2 border-orange-500' : 'bg-white border border-slate-100 hover:border-orange-300'} transition-all`}>
-            <span className={`text-xs font-bold ${isToday ? 'text-orange-600' : 'text-slate-700'}`}>
+          <div className={`h-full rounded-lg p-1.5 flex flex-col ${isToday ? 'bg-orange-50 border-2 border-orange-500' : 'bg-white border border-slate-100 hover:border-orange-300'} transition-all`}>
+            <span className={`text-xs font-bold mb-1 ${isToday ? 'text-orange-600' : 'text-slate-700'}`}>
               {day}
             </span>
-            <div className="flex-1 overflow-hidden mt-1 space-y-0.5">
-              {dateEvents.slice(0, 2).map((event, eventIndex) => (
+            <div className="flex-1 overflow-visible space-y-1 mt-1.5">
+              {dateEvents.length > 0 && dateEvents.slice(0, 3).map((event, eventIndex) => (
                 <div
                   key={`${date.toISOString().split('T')[0]}-${event.id}-${eventIndex}`}
                   onClick={(e) => { e.stopPropagation(); handleEventClick(event); }}
-                  className="text-[8px] px-1.5 py-0.5 rounded truncate font-bold text-white"
-                  style={{ backgroundColor: event.color || '#f97316' }}
-                >
-                  {event.title}
-                </div>
+                  className="h-4 w-full rounded-md cursor-pointer hover:opacity-90 hover:scale-[1.02] transition-all flex-shrink-0"
+                  style={{ 
+                    backgroundColor: event.color || '#f97316',
+                    minHeight: '16px',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                  }}
+                  title={event.title}
+                />
               ))}
-              {dateEvents.length > 2 && (
-                <div className="text-[8px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 font-bold">
-                  +{dateEvents.length - 2} more
+              {dateEvents.length > 3 && (
+                <div className="text-[8px] px-1 py-0.5 text-slate-500 font-bold">
+                  +{dateEvents.length - 3} more
                 </div>
               )}
             </div>
@@ -251,6 +316,57 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   };
 
   const selectedDateEvents = selectedDate ? getEventsForDate(selectedDate) : [];
+  
+  // Get today's events
+  const todaysEvents = useMemo(() => {
+    const today = new Date();
+    const todayEvents = getEventsForDate(today);
+    
+    // Remove duplicates by ID (in case of any data inconsistencies)
+    const uniqueEvents = Array.from(
+      new Map(todayEvents.map(event => [event.id, event])).values()
+    );
+    
+    return uniqueEvents.sort((a, b) => {
+      // Sort by time (all-day events first, then by start time)
+      if (a.allDay && !b.allDay) return -1;
+      if (!a.allDay && b.allDay) return 1;
+      if (a.allDay && b.allDay) return 0;
+      
+      const timeA = a.startDate ? new Date(a.startDate).getTime() : 0;
+      const timeB = b.startDate ? new Date(b.startDate).getTime() : 0;
+      return timeA - timeB;
+    });
+  }, [events, currentUser.id]);
+
+  // Filter available users for attendee selection (exclude current user)
+  const availableUsers = useMemo(() => {
+    return allUsers.filter(user => 
+      user.id !== currentUser.id && 
+      (!attendeeSearch || 
+       user.username.toLowerCase().includes(attendeeSearch.toLowerCase()) ||
+       user.name.toLowerCase().includes(attendeeSearch.toLowerCase()))
+    );
+  }, [allUsers, currentUser.id, attendeeSearch]);
+
+  // Get user info for selected attendees
+  const selectedAttendeeUsers = useMemo(() => {
+    return eventAttendees.map(attendeeId => 
+      allUsers.find(u => u.id === attendeeId)
+    ).filter(Boolean) as User[];
+  }, [eventAttendees, allUsers]);
+
+  const handleAddAttendee = (userId: string) => {
+    if (!eventAttendees.includes(userId)) {
+      setEventAttendees([...eventAttendees, userId]);
+    }
+    setAttendeeSearch('');
+    setShowAttendeeDropdown(false);
+  };
+
+  const handleRemoveAttendee = (userId: string) => {
+    setEventAttendees(eventAttendees.filter(id => id !== userId));
+  };
 
   if (isCreatingEvent || selectedEvent) {
     if (selectedEvent && !isCreatingEvent) {
@@ -358,6 +474,59 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           />
 
           <div>
+            <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">Attendees (optional)</label>
+            <div className="relative">
+              <div className="flex flex-wrap gap-2 mb-2">
+                {selectedAttendeeUsers.map(user => (
+                  <div
+                    key={user.id}
+                    className="flex items-center gap-1 px-2 py-1 bg-orange-100 text-orange-700 rounded-lg text-xs font-bold"
+                  >
+                    <span>@{user.username}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveAttendee(user.id)}
+                      className="hover:text-orange-900"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="relative" ref={attendeeDropdownRef}>
+                <input
+                  type="text"
+                  placeholder="Search by username..."
+                  value={attendeeSearch}
+                  onChange={(e) => {
+                    setAttendeeSearch(e.target.value);
+                    setShowAttendeeDropdown(true);
+                  }}
+                  onFocus={() => setShowAttendeeDropdown(true)}
+                  className="w-full p-2.5 bg-slate-50 rounded-xl border-2 border-transparent focus:border-orange-500 text-sm"
+                />
+                {showAttendeeDropdown && availableUsers.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-40 overflow-y-auto">
+                    {availableUsers.map(user => (
+                      <button
+                        key={user.id}
+                        type="button"
+                        onClick={() => handleAddAttendee(user.id)}
+                        className="w-full px-3 py-2 text-left hover:bg-orange-50 transition-colors flex items-center gap-2"
+                      >
+                        <div className="flex-1">
+                          <p className="text-sm font-bold text-slate-800">@{user.username}</p>
+                          <p className="text-xs text-slate-500">{user.name}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div>
             <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block">Color</label>
             <div className="flex gap-2">
               {colors.map(color => (
@@ -399,6 +568,94 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 pb-20 h-full flex flex-col">
+      {/* Today's Events Section */}
+      {todaysEvents.length > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+          <button
+            onClick={() => setShowTodaysEvents(!showTodaysEvents)}
+            className="w-full flex items-center justify-between p-4 hover:bg-slate-50 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Clock size={18} className="text-orange-600" />
+              <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">
+                Today's Events ({todaysEvents.length})
+              </h3>
+            </div>
+            {showTodaysEvents ? (
+              <ChevronUp size={18} className="text-slate-400" />
+            ) : (
+              <ChevronDown size={18} className="text-slate-400" />
+            )}
+          </button>
+          
+          {showTodaysEvents && (
+            <div className="px-4 pb-4 space-y-2 max-h-64 overflow-y-auto">
+              {todaysEvents.map((event, index) => (
+                <div
+                  key={`today-event-${event.id}-${index}`}
+                  onClick={() => handleEventClick(event)}
+                  className="p-3 rounded-xl border border-slate-100 hover:border-orange-300 hover:bg-orange-50/50 transition-all cursor-pointer"
+                >
+                  <div className="flex items-start gap-3">
+                    <div 
+                      className="w-3 h-3 rounded-full shrink-0 mt-1"
+                      style={{ backgroundColor: event.color || '#f97316' }}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <p className="font-bold text-slate-800 text-sm">{event.title}</p>
+                        {event.userId === currentUser.id && (
+                          <span className="text-[10px] px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded font-bold uppercase">
+                            You
+                          </span>
+                        )}
+                      </div>
+                      
+                      {event.description && (
+                        <p className="text-xs text-slate-600 mb-2 line-clamp-2">{event.description}</p>
+                      )}
+                      
+                      <div className="flex flex-wrap items-center gap-3 text-[10px] text-slate-500">
+                        {event.allDay ? (
+                          <span className="flex items-center gap-1">
+                            <Clock size={12} />
+                            All Day
+                          </span>
+                        ) : (
+                          event.startDate && (
+                            <span className="flex items-center gap-1">
+                              <Clock size={12} />
+                              {new Date(event.startDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              {event.endDate && event.endDate !== event.startDate && (
+                                <> - {new Date(event.endDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</>
+                              )}
+                            </span>
+                          )
+                        )}
+                        
+                        {event.location && (
+                          <span className="flex items-center gap-1">
+                            <MapPin size={12} />
+                            {event.location}
+                          </span>
+                        )}
+                        
+                        {event.attendees && event.attendees.length > 0 && (
+                          <span className="flex items-center gap-1">
+                            <Users size={12} />
+                            {event.attendees.length} {event.attendees.length === 1 ? 'attendee' : 'attendees'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm flex-1 flex flex-col min-h-0">
         <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
@@ -441,7 +698,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         ))}
       </div>
 
-      <div className="grid grid-cols-7 gap-1 flex-1 min-h-0">
+      <div className="grid grid-cols-7 gap-1 flex-1 min-h-0 overflow-visible">
         {renderCalendarGrid()}
       </div>
 
@@ -450,20 +707,25 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           <h5 className="text-xs font-black text-slate-700 mb-2 uppercase">
             {selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
           </h5>
-          <div className="space-y-2 max-h-32 overflow-y-auto">
+          <div className="space-y-1.5 max-h-32 overflow-y-auto">
             {selectedDateEvents.map(event => (
               <div
                 key={event.id}
                 onClick={() => handleEventClick(event)}
-                className="p-2 rounded-lg text-xs cursor-pointer hover:bg-slate-50 transition-colors"
-                style={{ borderLeft: `3px solid ${event.color || '#f97316'}` }}
+                className="py-1.5 px-2 text-xs cursor-pointer hover:bg-slate-50 transition-colors flex items-center gap-2"
               >
-                <p className="font-bold text-slate-800">{event.title}</p>
-                {event.startDate && (
-                  <p className="text-[10px] text-slate-500">
-                    {new Date(event.startDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </p>
-                )}
+                <div 
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{ backgroundColor: event.color || '#f97316' }}
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="font-bold text-slate-800 truncate">{event.title}</p>
+                  {event.startDate && !event.allDay && (
+                    <p className="text-[10px] text-slate-500">
+                      {new Date(event.startDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                  )}
+                </div>
               </div>
             ))}
           </div>

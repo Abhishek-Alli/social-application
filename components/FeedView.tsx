@@ -1,7 +1,7 @@
 
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { Post, User, Comment } from '../types';
-import { Heart, MessageSquare, Share2, MoreHorizontal, User as UserIcon, Send, X, Trash2, Download, Users } from 'lucide-react';
+import { Heart, MessageSquare, Share2, MoreHorizontal, User as UserIcon, Send, X, Trash2, Download, Users, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface FeedViewProps {
   posts: Post[];
@@ -12,6 +12,110 @@ interface FeedViewProps {
   onShare: (postId: string) => void;
   onDelete?: (postId: string) => void;
 }
+
+// Image Carousel Component
+const ImageCarousel: React.FC<{ images: string[]; postId: string }> = ({ images, postId }) => {
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [touchStart, setTouchStart] = useState<number | null>(null);
+  const [touchEnd, setTouchEnd] = useState<number | null>(null);
+  const minSwipeDistance = 50;
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setTouchEnd(null);
+    setTouchStart(e.targetTouches[0].clientX);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    setTouchEnd(e.targetTouches[0].clientX);
+  };
+
+  const handleTouchEnd = () => {
+    if (!touchStart || !touchEnd) return;
+    const distance = touchStart - touchEnd;
+    const isLeftSwipe = distance > minSwipeDistance;
+    const isRightSwipe = distance < -minSwipeDistance;
+
+    if (isLeftSwipe && currentIndex < images.length - 1) {
+      setCurrentIndex(prev => prev + 1);
+    }
+    if (isRightSwipe && currentIndex > 0) {
+      setCurrentIndex(prev => prev - 1);
+    }
+  };
+
+  const goToNext = () => {
+    setCurrentIndex(prev => (prev + 1) % images.length);
+  };
+
+  const goToPrevious = () => {
+    setCurrentIndex(prev => (prev - 1 + images.length) % images.length);
+  };
+
+  return (
+    <div 
+      className="relative w-full h-full"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+    >
+      <div className="relative w-full h-full overflow-hidden">
+        <div 
+          className="flex transition-transform duration-300 ease-in-out h-full"
+          style={{ transform: `translateX(-${currentIndex * 100}%)` }}
+        >
+          {images.map((img, index) => (
+            <div key={index} className="min-w-full h-full flex-shrink-0">
+              <img 
+                src={img} 
+                alt={`Post image ${index + 1}`} 
+                className="w-full h-full object-cover" 
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Navigation Arrows */}
+      {images.length > 1 && (
+        <>
+          <button
+            onClick={goToPrevious}
+            className="absolute left-2 top-1/2 -translate-y-1/2 p-2 bg-black/50 hover:bg-black/70 text-white rounded-full transition-all z-10"
+            aria-label="Previous image"
+          >
+            <ChevronLeft size={20} />
+          </button>
+          <button
+            onClick={goToNext}
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-black/50 hover:bg-black/70 text-white rounded-full transition-all z-10"
+            aria-label="Next image"
+          >
+            <ChevronRight size={20} />
+          </button>
+
+          {/* Dots Indicator */}
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
+            {images.map((_, index) => (
+              <button
+                key={index}
+                onClick={() => setCurrentIndex(index)}
+                className={`h-1.5 rounded-full transition-all ${
+                  index === currentIndex ? 'bg-white w-6' : 'bg-white/50 w-1.5'
+                }`}
+                aria-label={`Go to image ${index + 1}`}
+              />
+            ))}
+          </div>
+
+          {/* Image Counter */}
+          <div className="absolute top-3 right-3 bg-black/50 backdrop-blur-md px-2 py-1 rounded-full text-[10px] text-white font-bold z-10">
+            {currentIndex + 1}/{images.length}
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
 
 export const FeedView: React.FC<FeedViewProps> = ({ posts, currentUser, allUsers, onLike, onComment, onShare, onDelete }) => {
   const [commentingOn, setCommentingOn] = useState<string | null>(null);
@@ -108,7 +212,53 @@ export const FeedView: React.FC<FeedViewProps> = ({ posts, currentUser, allUsers
   // Download media function
   const handleDownloadMedia = async (post: Post) => {
     try {
-      const mediaUrl = post.video || post.image;
+      // Handle multiple images
+      const images = post.images && post.images.length > 0 ? post.images : (post.image ? [post.image] : []);
+      
+      // If multiple images, download all
+      if (images.length > 1) {
+        for (let i = 0; i < images.length; i++) {
+          const img = images[i];
+          const response = await fetch(img);
+          const blob = await response.blob();
+          const file = new File([blob], `post_${post.id}_${i + 1}_${Date.now()}.jpg`, { 
+            type: 'image/jpeg' 
+          });
+          
+          if (navigator.share && /Mobile|Android|iPhone|iPad/i.test(navigator.userAgent)) {
+            try {
+              await navigator.share({
+                files: [file],
+                title: `Post Image ${i + 1}`
+              });
+              // Small delay between shares
+              if (i < images.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+              }
+            } catch (err) {
+              console.error('Share failed, falling back to download:', err);
+              const url = URL.createObjectURL(file);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = file.name;
+              a.click();
+              URL.revokeObjectURL(url);
+            }
+          } else {
+            const url = URL.createObjectURL(file);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = file.name;
+            a.click();
+            URL.revokeObjectURL(url);
+          }
+        }
+        setOpenMenuId(null);
+        return;
+      }
+
+      // Single image or video
+      const mediaUrl = post.video || (images.length > 0 ? images[0] : null);
       if (!mediaUrl) return;
 
       const type = post.video ? 'video' : 'image';
@@ -196,13 +346,13 @@ export const FeedView: React.FC<FeedViewProps> = ({ posts, currentUser, allUsers
                   </button>
                   {openMenuId === post.id && (
                     <div className="absolute right-0 top-full mt-1 bg-white rounded-xl shadow-lg border border-slate-200 py-2 z-50 min-w-[160px] animate-in fade-in slide-in-from-top-2">
-                      {(post.image || post.video) && (
+                      {((post.images && post.images.length > 0) || post.image || post.video) && (
                         <button
                           onClick={() => handleDownloadMedia(post)}
                           className="w-full px-4 py-2.5 text-left text-sm font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-3 transition-colors"
                         >
                           <Download size={16} className="text-slate-500" />
-                          <span>Download</span>
+                          <span>Download {post.images && post.images.length > 1 ? 'All Images' : 'Media'}</span>
                         </button>
                       )}
                     </div>
@@ -211,10 +361,12 @@ export const FeedView: React.FC<FeedViewProps> = ({ posts, currentUser, allUsers
               </div>
             </div>
 
-            {(post.image || post.video) && (
-              <div className={`w-full bg-slate-900 flex items-center justify-center relative ${ratioClass}`}>
+            {((post.images && post.images.length > 0) || post.image || post.video) && (
+              <div className={`w-full bg-slate-900 flex items-center justify-center relative ${ratioClass} overflow-hidden`}>
                 {post.video ? (
                   <video src={post.video} className="w-full h-full object-cover" controls loop playsInline />
+                ) : (post.images && post.images.length > 0) ? (
+                  <ImageCarousel images={post.images} postId={post.id} />
                 ) : post.image ? (
                   <img src={post.image} alt="Post content" className="w-full h-full object-cover" />
                 ) : null}

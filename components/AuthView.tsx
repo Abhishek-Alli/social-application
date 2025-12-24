@@ -50,6 +50,12 @@ export const AuthView: React.FC<AuthViewProps> = ({
   
   const [isAddingSub, setIsAddingSub] = useState(false);
   const [showAllPosts, setShowAllPosts] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
   const [editForm, setEditForm] = useState({
     name: '', email: '', username: '', dob: '', department: '', subDepartment: '',
     designation: '', employeeId: '', contactNo: '', profilePhoto: ''
@@ -99,6 +105,48 @@ export const AuthView: React.FC<AuthViewProps> = ({
     if (onUpdateProfile && editUsername) {
       onUpdateProfile({ username: editUsername.replace('@', '').toLowerCase() });
       setIsEditing(false);
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onUpdateProfile || !currentUser) return;
+
+    // Validate passwords
+    if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
+      alert('Please fill in all password fields.');
+      return;
+    }
+
+    // Verify current password
+    if (currentUser.password && currentUser.password !== passwordForm.currentPassword.trim()) {
+      alert('Current password is incorrect.');
+      return;
+    }
+
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      alert('New password and confirm password do not match.');
+      return;
+    }
+
+    if (passwordForm.newPassword.length < 6) {
+      alert('New password must be at least 6 characters long.');
+      return;
+    }
+
+    if (passwordForm.currentPassword === passwordForm.newPassword) {
+      alert('New password must be different from current password.');
+      return;
+    }
+
+    try {
+      await onUpdateProfile({ password: passwordForm.newPassword.trim() });
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      setIsChangingPassword(false);
+      alert('Password changed successfully!');
+    } catch (error) {
+      console.error('Failed to change password:', error);
+      alert('Failed to change password. Please try again.');
     }
   };
 
@@ -334,6 +382,70 @@ export const AuthView: React.FC<AuthViewProps> = ({
 
           </div>
         </div>
+        </div>
+
+        {/* Change Password Section */}
+        <div className="px-2 mt-4">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Key size={18} className="text-orange-600" />
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Password Security</h3>
+              </div>
+              <button
+                onClick={() => setIsChangingPassword(!isChangingPassword)}
+                className="text-xs font-bold text-orange-600 hover:text-orange-700 transition-colors"
+              >
+                {isChangingPassword ? 'Cancel' : 'Change Password'}
+              </button>
+            </div>
+
+            {isChangingPassword && (
+              <form onSubmit={handleChangePassword} className="space-y-3 animate-in slide-in-from-top-2">
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Current Password</label>
+                  <input
+                    type="password"
+                    value={passwordForm.currentPassword}
+                    onChange={(e) => setPasswordForm({...passwordForm, currentPassword: e.target.value})}
+                    className="w-full p-3 bg-slate-50 rounded-xl border-2 border-transparent focus:border-orange-500 text-sm font-medium transition-all"
+                    placeholder="Enter current password"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">New Password</label>
+                  <input
+                    type="password"
+                    value={passwordForm.newPassword}
+                    onChange={(e) => setPasswordForm({...passwordForm, newPassword: e.target.value})}
+                    className="w-full p-3 bg-slate-50 rounded-xl border-2 border-transparent focus:border-orange-500 text-sm font-medium transition-all"
+                    placeholder="Enter new password (min 6 characters)"
+                    minLength={6}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Confirm New Password</label>
+                  <input
+                    type="password"
+                    value={passwordForm.confirmPassword}
+                    onChange={(e) => setPasswordForm({...passwordForm, confirmPassword: e.target.value})}
+                    className="w-full p-3 bg-slate-50 rounded-xl border-2 border-transparent focus:border-orange-500 text-sm font-medium transition-all"
+                    placeholder="Confirm new password"
+                    minLength={6}
+                    required
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="w-full py-3 bg-orange-600 text-white font-black uppercase tracking-widest rounded-xl shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
+                >
+                  <Lock size={16} /> Update Password
+                </button>
+              </form>
+            )}
+          </div>
         </div>
 
         {/* Edit Profile Modal */}

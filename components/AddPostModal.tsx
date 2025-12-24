@@ -4,49 +4,99 @@ import { X, ImageIcon, Send, Sparkles, Video as VideoIcon } from 'lucide-react';
 
 interface AddPostModalProps {
   onClose: () => void;
-  onSave: (data: { text: string; image?: string; video?: string; ratio: '3:4' | '16:9' | '1:1' }) => void;
+  onSave: (data: { text: string; image?: string; images?: string[]; video?: string; ratio: '3:4' | '16:9' | '1:1' }) => void;
 }
 
 export const AddPostModal: React.FC<AddPostModalProps> = ({ onClose, onSave }) => {
   const [text, setText] = useState('');
   const [media, setMedia] = useState<{ type: 'image' | 'video'; data: string } | null>(null);
+  const [images, setImages] = useState<string[]>([]); // Multiple images
   const [ratio, setRatio] = useState<'3:4' | '16:9' | '1:1'>('1:1');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const isVideo = file.type.startsWith('video/');
-      const maxSize = 20 * 1024 * 1024; // 20MB
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
+    const maxSize = 20 * 1024 * 1024; // 20MB
+    const maxImages = 10; // Maximum 10 images per post
+
+    // Check for videos (only one video allowed)
+    const videoFiles = Array.from(files).filter(f => f.type.startsWith('video/'));
+    if (videoFiles.length > 0) {
+      const videoFile = videoFiles[0];
+      if (videoFile.size > maxSize) {
+        alert("Video file too large. Max size is 20MB.");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setMedia({
+          type: 'video',
+          data: reader.result as string
+        });
+        setRatio('16:9');
+        setImages([]); // Clear images if video is selected
+      };
+      reader.readAsDataURL(videoFile);
+      return;
+    }
+
+    // Handle multiple images
+    const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+    if (imageFiles.length === 0) return;
+
+    if (images.length + imageFiles.length > maxImages) {
+      alert(`Maximum ${maxImages} images allowed. You can add ${maxImages - images.length} more.`);
+      return;
+    }
+
+    const newImages: string[] = [];
+    let loadedCount = 0;
+
+    imageFiles.forEach(file => {
       if (file.size > maxSize) {
-        alert("File too large. Max size is 20MB.");
+        alert(`Image "${file.name}" is too large. Max size is 20MB.`);
         return;
       }
 
       const reader = new FileReader();
       reader.onloadend = () => {
-        setMedia({
-          type: isVideo ? 'video' : 'image',
-          data: reader.result as string
-        });
-        // Auto-set ratio based on common video patterns if it's a video
-        if (isVideo) setRatio('16:9');
+        newImages.push(reader.result as string);
+        loadedCount++;
+        if (loadedCount === imageFiles.length) {
+          setImages(prev => [...prev, ...newImages]);
+          setMedia(null); // Clear video if images are selected
+        }
       };
       reader.readAsDataURL(file);
-    }
+    });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!text.trim() && !media) return;
-    onSave({ 
-      text, 
-      image: media?.type === 'image' ? media.data : undefined, 
-      video: media?.type === 'video' ? media.data : undefined, 
-      ratio 
-    });
+    if (!text.trim() && !media && images.length === 0) return;
+    
+    // If multiple images, use images array; otherwise use single image/video for backward compatibility
+    if (images.length > 0) {
+      onSave({ 
+        text, 
+        images: images,
+        ratio 
+      });
+    } else {
+      onSave({ 
+        text, 
+        image: media?.type === 'image' ? media.data : undefined, 
+        video: media?.type === 'video' ? media.data : undefined, 
+        ratio 
+      });
+    }
     onClose();
+  };
+
+  const handleRemoveImage = (index: number) => {
+    setImages(prev => prev.filter((_, i) => i !== index));
   };
 
   return (
@@ -92,7 +142,7 @@ export const AddPostModal: React.FC<AddPostModalProps> = ({ onClose, onSave }) =
               )}
             </div>
 
-            {!media ? (
+            {images.length === 0 && !media ? (
               <button 
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -106,8 +156,39 @@ export const AddPostModal: React.FC<AddPostModalProps> = ({ onClose, onSave }) =
                     <VideoIcon size={24} />
                   </div>
                 </div>
-                <span className="text-xs font-bold uppercase tracking-tight">Add Visual Proof (Max 20MB)</span>
+                <span className="text-xs font-bold uppercase tracking-tight">Add Visual Proof (Max 20MB, up to 10 images)</span>
               </button>
+            ) : images.length > 0 ? (
+              <div className="space-y-3">
+                <div className="flex gap-2 overflow-x-auto pb-2">
+                  {images.map((img, index) => (
+                    <div key={index} className="relative shrink-0">
+                      <div className={`overflow-hidden rounded-2xl bg-slate-100 ${ratio === '1:1' ? 'w-32 h-32' : ratio === '3:4' ? 'w-24 h-32' : 'w-48 h-27'}`}>
+                        <img src={img} alt={`Preview ${index + 1}`} className="w-full h-full object-cover" />
+                      </div>
+                      <button 
+                        type="button"
+                        onClick={() => handleRemoveImage(index)}
+                        className="absolute top-1 right-1 p-1 bg-black/50 text-white rounded-full hover:bg-rose-600 transition-all shadow-lg z-10"
+                      >
+                        <X size={12} />
+                      </button>
+                      <div className="absolute bottom-1 left-1 bg-black/50 text-white text-[10px] px-1.5 py-0.5 rounded font-bold">
+                        {index + 1}/{images.length}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {images.length < 10 && (
+                  <button 
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full py-3 border-2 border-dashed border-slate-300 rounded-xl text-slate-500 hover:border-orange-300 hover:text-orange-500 transition-all text-xs font-bold uppercase"
+                  >
+                    + Add More Images ({images.length}/10)
+                  </button>
+                )}
+              </div>
             ) : (
               <div className="relative group">
                 <div className={`w-full overflow-hidden rounded-3xl bg-slate-100 ${ratio === '1:1' ? 'aspect-square' : ratio === '3:4' ? 'aspect-[3/4]' : 'aspect-[16/9]'}`}>
@@ -131,6 +212,7 @@ export const AddPostModal: React.FC<AddPostModalProps> = ({ onClose, onSave }) =
               ref={fileInputRef} 
               className="hidden" 
               accept="image/*,video/*" 
+              multiple
               onChange={handleFileChange} 
             />
           </div>

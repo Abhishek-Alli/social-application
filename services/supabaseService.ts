@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { supabaseConfig } from '../supabase.config';
 import { 
   User, 
@@ -14,7 +14,23 @@ import {
   CalendarEvent 
 } from '../types';
 
-export const supabase = createClient(supabaseConfig.url, supabaseConfig.anonKey);
+// Singleton pattern to prevent multiple client instances during HMR
+let supabaseInstance: SupabaseClient | null = null;
+
+const getSupabaseClient = (): SupabaseClient => {
+  if (!supabaseInstance) {
+    supabaseInstance = createClient(supabaseConfig.url, supabaseConfig.anonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    });
+  }
+  return supabaseInstance;
+};
+
+export const supabase = getSupabaseClient();
 
 // Helper function to map database user row to User type
 const mapDbUserToUser = (data: any): User => ({
@@ -106,8 +122,9 @@ export const userService = {
     if (updates.isEmailVerified !== undefined) updateData.is_email_verified = updates.isEmailVerified;
     if (updates.telegramUserId !== undefined) updateData.telegram_user_id = updates.telegramUserId;
     if (updates.telegramToken !== undefined) updateData.telegram_token = updates.telegramToken;
+    if (updates.password !== undefined) updateData.password = updates.password;
     
-    // Remove camelCase fields that were mapped
+    // Remove camelCase fields that were mapped (but keep password as it's already in the correct format)
     delete updateData.parentId;
     delete updateData.projectId;
     delete updateData.employeeId;
@@ -345,6 +362,7 @@ export const postService = {
         user_username: post.userUsername,
         text: post.text,
         image: post.image || null,
+        images: post.images && post.images.length > 0 ? post.images : null,
         video: post.video || null,
         ratio: post.ratio || '1:1',
         likes: post.likes || [],
@@ -398,16 +416,32 @@ export const complaintService = {
   },
 
   async create(complaint: Omit<Complaint, 'id' | 'createdAt'>): Promise<Complaint> {
+    // Generate a unique ID for the complaint
+    const complaintId = 'c' + Date.now().toString() + Math.random().toString(36).substring(2, 11);
+    
+    const insertData: any = {
+      id: complaintId,
+      project_id: complaint.projectId,
+      user_id: complaint.userId,
+      user_name: complaint.userName,
+      user_role: complaint.userRole,
+      subject: complaint.subject,
+      message: complaint.message,
+      status: complaint.status || 'pending',
+      created_at: new Date().toISOString()
+    };
+    
+    if (complaint.targetUserId) {
+      insertData.target_user_id = complaint.targetUserId;
+    }
+    
+    if (complaint.attachment) {
+      insertData.attachment = complaint.attachment;
+    }
+    
     const { data, error } = await supabase
       .from('complaints')
-      .insert({
-        ...complaint,
-        project_id: complaint.projectId,
-        user_id: complaint.userId,
-        user_name: complaint.userName,
-        user_role: complaint.userRole,
-        created_at: new Date().toISOString()
-      })
+      .insert(insertData)
       .select()
       .single();
     if (error) throw error;

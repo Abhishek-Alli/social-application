@@ -263,6 +263,7 @@ const App: React.FC = () => {
           userId: c.user_id || c.userId,
           userName: c.user_name || c.userName,
           userRole: c.user_role || c.userRole,
+          targetUserId: c.target_user_id || c.targetUserId,
           createdAt: c.created_at || c.createdAt
         })));
 
@@ -302,6 +303,7 @@ const App: React.FC = () => {
 
         // Load calendar events
         const projectCalendarEvents = await calendarService.getByProject(currentProjectId);
+        console.log('Loaded calendar events:', projectCalendarEvents);
         setCalendarEvents(projectCalendarEvents);
 
         // Load notifications for current user
@@ -538,6 +540,7 @@ const App: React.FC = () => {
                 userId: newComplaint.user_id || newComplaint.userId,
                 userName: newComplaint.user_name || newComplaint.userName,
                 userRole: newComplaint.user_role || newComplaint.userRole,
+                targetUserId: newComplaint.target_user_id || newComplaint.targetUserId,
                 createdAt: newComplaint.created_at || newComplaint.createdAt
               }]);
             } else if (payload.eventType === 'UPDATE') {
@@ -548,6 +551,7 @@ const App: React.FC = () => {
                 userId: updatedComplaint.user_id || updatedComplaint.userId,
                 userName: updatedComplaint.user_name || updatedComplaint.userName,
                 userRole: updatedComplaint.user_role || updatedComplaint.userRole,
+                targetUserId: updatedComplaint.target_user_id || updatedComplaint.targetUserId,
                 createdAt: updatedComplaint.created_at || updatedComplaint.createdAt
               } : c));
             } else if (payload.eventType === 'DELETE') {
@@ -692,6 +696,71 @@ const App: React.FC = () => {
       });
     };
   }, [currentProjectId, currentUser]);
+
+  // Check for calendar events happening today and send notifications
+  useEffect(() => {
+    if (!currentUser || !currentProjectId || calendarEvents.length === 0) return;
+
+    const checkTodayEvents = () => {
+      const today = new Date();
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      
+      // Track notifications sent today using a Set (in-memory only, no localStorage)
+      const sentNotifications = new Set<string>();
+      
+      calendarEvents.forEach(event => {
+        const eventStart = new Date(event.startDate);
+        const eventStartStr = `${eventStart.getFullYear()}-${String(eventStart.getMonth() + 1).padStart(2, '0')}-${String(eventStart.getDate()).padStart(2, '0')}`;
+        
+        // Check if event is today
+        if (eventStartStr === todayStr) {
+          const notificationKey = `cal_notif_${event.id}_${currentUser.id}`;
+          
+          // Check if notification already sent (in-memory only)
+          if (!sentNotifications.has(notificationKey)) {
+            // Notify event creator
+            if (event.userId === currentUser.id) {
+              addNotification(
+                currentUser.id,
+                'Event Today',
+                `Your event "${event.title}" is today!`,
+                'calendar',
+                'calendar'
+              ).catch(console.error);
+              sentNotifications.add(notificationKey);
+            }
+            
+            // Notify attendees
+            if (event.attendees && event.attendees.length > 0) {
+              event.attendees.forEach(attendeeId => {
+                if (attendeeId === currentUser.id) {
+                  const attendeeKey = `cal_notif_${event.id}_${attendeeId}`;
+                  if (!sentNotifications.has(attendeeKey)) {
+                    addNotification(
+                      attendeeId,
+                      'Event Today',
+                      `Event "${event.title}" is today!`,
+                      'calendar',
+                      'calendar'
+                    ).catch(console.error);
+                    sentNotifications.add(attendeeKey);
+                  }
+                }
+              });
+            }
+          }
+        }
+      });
+    };
+
+    // Check immediately
+    checkTodayEvents();
+
+    // Check every hour for events happening today
+    const interval = setInterval(checkTodayEvents, 60 * 60 * 1000); // Every hour
+
+    return () => clearInterval(interval);
+  }, [calendarEvents, currentUser, currentProjectId]);
 
   // Keep localStorage/sessionStorage sync for current user
   useEffect(() => {
@@ -989,7 +1058,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleCreatePost = async (data: { text: string; image?: string; video?: string; ratio: '3:4' | '16:9' | '1:1' }) => {
+  const handleCreatePost = async (data: { text: string; image?: string; images?: string[]; video?: string; ratio: '3:4' | '16:9' | '1:1' }) => {
     if (!currentUser || !currentProjectId) return;
     try {
       await postService.create({
@@ -999,6 +1068,7 @@ const App: React.FC = () => {
       userUsername: currentUser.username,
       text: data.text,
       image: data.image,
+      images: data.images,
       video: data.video,
       ratio: data.ratio,
       likes: [],
@@ -1331,12 +1401,43 @@ const App: React.FC = () => {
   const handleCreateCalendarEvent = async (event: Omit<CalendarEvent, 'id' | 'createdAt' | 'projectId' | 'userId'>) => {
     if (!currentUser || !currentProjectId) return;
     try {
+      console.log('Creating event with data:', { ...event, projectId: currentProjectId, userId: currentUser.id });
       const newEvent = await calendarService.create({
         ...event,
         projectId: currentProjectId,
         userId: currentUser.id
       });
-      setCalendarEvents(prev => [...prev, newEvent]);
+      console.log('Event created successfully:', newEvent);
+      console.log('Event startDate:', newEvent.startDate, 'Event endDate:', newEvent.endDate);
+      setCalendarEvents(prev => {
+        const updated = [...prev, newEvent];
+        console.log('Updated calendar events count:', updated.length);
+        return updated;
+      });
+
+      // Notify event creator
+      await addNotification(
+        currentUser.id,
+        'Calendar Event Created',
+        `Event "${event.title}" has been added to your calendar`,
+        'calendar',
+        'calendar'
+      );
+
+      // Notify attendees if any
+      if (event.attendees && event.attendees.length > 0) {
+        for (const attendeeId of event.attendees) {
+          if (attendeeId !== currentUser.id) {
+            await addNotification(
+              attendeeId,
+              'Calendar Event Invitation',
+              `${currentUser.name} invited you to "${event.title}"`,
+              'calendar',
+              'calendar'
+            );
+          }
+        }
+      }
     } catch (error) {
       console.error('Failed to create calendar event:', error);
       alert('Failed to create calendar event. Please try again.');
@@ -1344,8 +1445,28 @@ const App: React.FC = () => {
   };
 
   const handleUpdateCalendarEvent = async (id: string, updates: Partial<CalendarEvent>) => {
+    if (!currentUser || !currentProjectId) return;
     try {
+      const existingEvent = calendarEvents.find(e => e.id === id);
       await calendarService.update(id, updates);
+      
+      // Notify attendees if attendees were added or changed
+      if (updates.attendees && updates.attendees.length > 0) {
+        const newAttendees = updates.attendees.filter(attendeeId => 
+          !existingEvent?.attendees?.includes(attendeeId) && attendeeId !== currentUser.id
+        );
+        
+        for (const attendeeId of newAttendees) {
+          await addNotification(
+            attendeeId,
+            'Calendar Event Invitation',
+            `${currentUser.name} invited you to "${updates.title || existingEvent?.title || 'an event'}"`,
+            'calendar',
+            'calendar'
+          );
+        }
+      }
+      
       // Real-time subscription will update the state automatically
     } catch (error) {
       console.error('Failed to update calendar event:', error);
@@ -1354,18 +1475,34 @@ const App: React.FC = () => {
   };
 
   const handleDeleteCalendarEvent = async (id: string) => {
+    if (!currentUser || !currentProjectId) return;
     try {
+      console.log('Deleting calendar event from database:', id);
+      
+      // Delete from database
       await calendarService.delete(id);
-      // Real-time subscription will update the state automatically
+      console.log('Calendar event deleted successfully from database');
+      
+      // Remove from local state immediately
+      setCalendarEvents(prev => prev.filter(e => e.id !== id));
+      
+      // Real-time subscription will also update, but we've already updated locally
     } catch (error) {
-      console.error('Failed to delete calendar event:', error);
+      console.error('Failed to delete calendar event from database:', error);
       alert('Failed to delete calendar event. Please try again.');
     }
   };
 
-  const handleSubmitComplaint = async (subject: string, message: string, attachment?: ComplaintAttachment) => {
+  const handleSubmitComplaint = async (subject: string, message: string, targetUserId: string, attachment?: ComplaintAttachment) => {
     if (!currentUser || !currentProjectId) return;
     try {
+      // Verify target user is a management user
+      const targetUser = users.find(u => u.id === targetUserId);
+      if (!targetUser || targetUser.role !== Role.MANAGEMENT) {
+        alert('Invalid target user. Please select a valid management user.');
+        return;
+      }
+
       await complaintService.create({
         projectId: currentProjectId,
         userId: currentUser.id,
@@ -1374,24 +1511,18 @@ const App: React.FC = () => {
         subject,
         message,
         status: 'pending',
-        attachment
+        attachment,
+        targetUserId
       });
       
-      // Notify admins and management about new complaint
-      const adminsAndManagement = users.filter(u => 
-        u.projectId === currentProjectId && 
-        (u.role === Role.ADMIN || u.role === Role.MANAGEMENT) &&
-        u.id !== currentUser.id
+      // Notify only the selected management user about the complaint
+      await addNotification(
+        targetUserId,
+        'New Complaint',
+        `${currentUser.name} submitted a complaint: ${subject}`,
+        'complaint',
+        'complaints'
       );
-      for (const admin of adminsAndManagement) {
-        await addNotification(
-          admin.id,
-          'New Complaint',
-          `${currentUser.name} submitted a complaint: ${subject}`,
-          'complaint',
-          'complaints'
-        );
-      }
       
       // Real-time subscription will update the state automatically
     } catch (error) {
@@ -1943,7 +2074,8 @@ const App: React.FC = () => {
       case 'complaints':
         return currentUser ? <ComplaintsView 
           currentUser={currentUser} 
-          complaints={filteredComplaints} 
+          complaints={filteredComplaints}
+          allUsers={scopedUsers}
           onSubmitComplaint={handleSubmitComplaint}
           onResolveComplaint={handleResolveComplaint}
         /> : null;
