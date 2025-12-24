@@ -49,6 +49,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
   const [isDownloading, setIsDownloading] = useState(false);
   
   const [isAddingSub, setIsAddingSub] = useState(false);
+  const [showAllPosts, setShowAllPosts] = useState(false);
   const [editForm, setEditForm] = useState({
     name: '', email: '', username: '', dob: '', department: '', subDepartment: '',
     designation: '', employeeId: '', contactNo: '', profilePhoto: ''
@@ -457,41 +458,63 @@ export const AuthView: React.FC<AuthViewProps> = ({
         )}
 
         {/* User Posts Section */}
-        {userPosts && userPosts.length > 0 && (
-          <div className="px-2 space-y-4">
-            <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
-              <Megaphone size={16} className="text-orange-600" /> My Posts
-            </h3>
-            <div className="grid grid-cols-3 gap-2">
-              {userPosts.map(post => (
-                <div key={post.id} className="relative group aspect-square bg-slate-100 rounded-xl overflow-hidden">
-                  {post.image ? (
-                    <img src={post.image} alt="Post" className="w-full h-full object-cover" />
-                  ) : post.video ? (
-                    <video src={post.video} className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center p-2">
-                      <p className="text-[8px] text-slate-400 text-center line-clamp-3">{post.text}</p>
-                    </div>
-                  )}
-                  {onDeletePost && (
-                    <button
-                      onClick={() => {
-                        if (window.confirm('Delete this post?')) {
-                          onDeletePost(post.id);
-                        }
-                      }}
-                      className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 bg-black/50 hover:bg-black/70 text-white rounded-full p-1 transition-all"
-                      title="Delete"
-                    >
-                      <X size={12} />
-                    </button>
-                  )}
-                </div>
-              ))}
+        {userPosts && userPosts.length > 0 && (() => {
+          // Sort posts by date (newest first)
+          const sortedPosts = [...userPosts].sort((a, b) => 
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          );
+          
+          // Show only latest 3 posts if there are more than 3 and "View All" is not clicked
+          const displayPosts = sortedPosts.length > 3 && !showAllPosts 
+            ? sortedPosts.slice(0, 3) 
+            : sortedPosts;
+          
+          return (
+            <div className="px-2 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                  <Megaphone size={16} className="text-orange-600" /> My Posts
+                </h3>
+                {sortedPosts.length > 3 && (
+                  <button
+                    onClick={() => setShowAllPosts(!showAllPosts)}
+                    className="text-[10px] font-black text-orange-600 uppercase tracking-widest hover:text-orange-700 transition-colors"
+                  >
+                    {showAllPosts ? 'Show Less' : `View All (${sortedPosts.length})`}
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {displayPosts.map(post => (
+                  <div key={post.id} className="relative group aspect-square bg-slate-100 rounded-xl overflow-hidden">
+                    {post.image ? (
+                      <img src={post.image} alt="Post" className="w-full h-full object-cover" />
+                    ) : post.video ? (
+                      <video src={post.video} className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center p-2">
+                        <p className="text-[8px] text-slate-400 text-center line-clamp-3">{post.text}</p>
+                      </div>
+                    )}
+                    {onDeletePost && (
+                      <button
+                        onClick={() => {
+                          if (window.confirm('Delete this post?')) {
+                            onDeletePost(post.id);
+                          }
+                        }}
+                        className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 bg-black/50 hover:bg-black/70 text-white rounded-full p-1 transition-all"
+                        title="Delete"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Security Settings Section */}
         <div className="px-2 space-y-4">

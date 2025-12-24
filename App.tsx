@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Task, Priority, ViewType, Note, Role, User, Complaint, ComplaintAttachment, Notification, Message, Group, MessageAttachment, Post, Comment, Project, Email, CallInfo } from './types';
+import { Task, Priority, ViewType, Note, Role, User, Complaint, ComplaintAttachment, Notification, Message, Group, MessageAttachment, Post, Comment, Project, Email, CallInfo, CalendarEvent } from './types';
 import { 
   userService, 
   projectService, 
@@ -12,6 +12,7 @@ import {
   messageService, 
   groupService, 
   emailService,
+  calendarService,
   supabase 
 } from './services/supabaseService';
 import { TaskCard } from './components/TaskCard';
@@ -26,6 +27,7 @@ import { ChatView } from './components/ChatView';
 import { FeedView } from './components/FeedView';
 import { ProjectsView } from './components/ProjectsView';
 import { EmailsView } from './components/EmailsView';
+import { CalendarView } from './components/CalendarView';
 import { 
   Plus, 
   Calendar, 
@@ -63,6 +65,13 @@ import {
 
 type SortType = 'newest' | 'oldest' | 'priority' | 'due_date';
 
+// Helper function to detect mobile devices
+const isMobileDevice = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+         window.innerWidth <= 768;
+};
+
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -76,8 +85,10 @@ const App: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [emails, setEmails] = useState<Email[]>([]);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   
-  const [view, setView] = useState<ViewType>('profile');
+  // Set initial view to 'feed' (Social) on mobile, 'profile' on desktop
+  const [view, setView] = useState<ViewType>(isMobileDevice() ? 'feed' : 'profile');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isPostModalOpen, setIsPostModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -168,6 +179,10 @@ const App: React.FC = () => {
         // Immediately set user for instant login (better UX on mobile)
         setCurrentUser(user);
         if (user.projectId) setCurrentProjectId(user.projectId);
+        // Set view to 'feed' (Social) on mobile, keep current view on desktop
+        if (isMobileDevice() && view === 'profile') {
+          setView('feed');
+        }
         console.log('✅ Auto-login successful');
         
         // Verify user still exists in database in the background
@@ -284,6 +299,10 @@ const App: React.FC = () => {
           receiverEmail: e.receiver_email || e.receiverEmail,
           createdAt: e.created_at || e.createdAt
         })));
+
+        // Load calendar events
+        const projectCalendarEvents = await calendarService.getByProject(currentProjectId);
+        setCalendarEvents(projectCalendarEvents);
 
         // Load notifications for current user
         if (currentUser) {
@@ -612,7 +631,52 @@ const App: React.FC = () => {
         )
         .subscribe();
 
-      subscriptions.push(tasksSub, postsSub, messagesSub, notesSub, complaintsSub, emailsSub, groupsSub);
+      // Calendar events subscription
+      const calendarSub = supabase
+        .channel('calendar_events_changes')
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'calendar_events', filter: `project_id=eq.${currentProjectId}` },
+          async (payload) => {
+            if (payload.eventType === 'INSERT') {
+              const newEvent = payload.new as any;
+              setCalendarEvents(prev => [...prev, {
+                id: newEvent.id,
+                projectId: newEvent.project_id || newEvent.projectId,
+                userId: newEvent.user_id || newEvent.userId,
+                title: newEvent.title,
+                description: newEvent.description,
+                startDate: newEvent.start_date || newEvent.startDate,
+                endDate: newEvent.end_date || newEvent.endDate,
+                location: newEvent.location,
+                attendees: newEvent.attendees || [],
+                color: newEvent.color || '#f97316',
+                allDay: newEvent.all_day || newEvent.allDay || false,
+                createdAt: newEvent.created_at || newEvent.createdAt
+              }]);
+            } else if (payload.eventType === 'UPDATE') {
+              const updatedEvent = payload.new as any;
+              setCalendarEvents(prev => prev.map(e => e.id === updatedEvent.id ? {
+                id: updatedEvent.id,
+                projectId: updatedEvent.project_id || updatedEvent.projectId,
+                userId: updatedEvent.user_id || updatedEvent.userId,
+                title: updatedEvent.title,
+                description: updatedEvent.description,
+                startDate: updatedEvent.start_date || updatedEvent.startDate,
+                endDate: updatedEvent.end_date || updatedEvent.endDate,
+                location: updatedEvent.location,
+                attendees: updatedEvent.attendees || [],
+                color: updatedEvent.color || '#f97316',
+                allDay: updatedEvent.all_day || updatedEvent.allDay || false,
+                createdAt: updatedEvent.created_at || updatedEvent.createdAt
+              } : e));
+            } else if (payload.eventType === 'DELETE') {
+              setCalendarEvents(prev => prev.filter(e => e.id !== payload.old.id));
+            }
+          }
+        )
+        .subscribe();
+
+      subscriptions.push(tasksSub, postsSub, messagesSub, notesSub, complaintsSub, emailsSub, groupsSub, calendarSub);
     };
 
     setupRealtimeSubscriptions();
@@ -818,7 +882,8 @@ const App: React.FC = () => {
     
     setNeedsTwoStep(false);
     setPendingUser(null);
-    setView('tasks');
+    // Set view to 'feed' (Social) on mobile, 'tasks' on desktop
+    setView(isMobileDevice() ? 'feed' : 'tasks');
   };
 
   const handleLogout = () => {
@@ -1049,14 +1114,24 @@ const App: React.FC = () => {
 
   const handleDeletePost = async (postId: string) => {
     try {
-      // Optimistically remove from UI immediately
+      console.log('Deleting post from database:', postId);
+      
+      const post = posts.find(p => p.id === postId);
+      if (!post) {
+        console.warn('Post not found:', postId);
+        return;
+      }
+
+      // Delete from database first
+      await postService.delete(postId);
+      console.log('Post deleted successfully from database');
+      
+      // Then remove from UI (optimistic update already handled by real-time subscription)
       setPosts(prev => prev.filter(p => p.id !== postId));
       
-      // Delete from database
-      await postService.delete(postId);
       // Real-time subscription will also update, but we've already updated locally
     } catch (error) {
-      console.error('Failed to delete post:', error);
+      console.error('Failed to delete post from database:', error);
       // Re-add the post if delete failed
       const post = posts.find(p => p.id === postId);
       if (post) {
@@ -1253,6 +1328,41 @@ const App: React.FC = () => {
     }
   };
 
+  const handleCreateCalendarEvent = async (event: Omit<CalendarEvent, 'id' | 'createdAt' | 'projectId' | 'userId'>) => {
+    if (!currentUser || !currentProjectId) return;
+    try {
+      const newEvent = await calendarService.create({
+        ...event,
+        projectId: currentProjectId,
+        userId: currentUser.id
+      });
+      setCalendarEvents(prev => [...prev, newEvent]);
+    } catch (error) {
+      console.error('Failed to create calendar event:', error);
+      alert('Failed to create calendar event. Please try again.');
+    }
+  };
+
+  const handleUpdateCalendarEvent = async (id: string, updates: Partial<CalendarEvent>) => {
+    try {
+      await calendarService.update(id, updates);
+      // Real-time subscription will update the state automatically
+    } catch (error) {
+      console.error('Failed to update calendar event:', error);
+      alert('Failed to update calendar event. Please try again.');
+    }
+  };
+
+  const handleDeleteCalendarEvent = async (id: string) => {
+    try {
+      await calendarService.delete(id);
+      // Real-time subscription will update the state automatically
+    } catch (error) {
+      console.error('Failed to delete calendar event:', error);
+      alert('Failed to delete calendar event. Please try again.');
+    }
+  };
+
   const handleSubmitComplaint = async (subject: string, message: string, attachment?: ComplaintAttachment) => {
     if (!currentUser || !currentProjectId) return;
     try {
@@ -1352,29 +1462,95 @@ const App: React.FC = () => {
     }
   };
 
-  const handleDeleteMessage = async (messageId: string) => {
+  const handleDeleteMessage = async (messageId: string, deleteForEveryone: boolean = false) => {
     try {
-      console.log('Deleting message:', messageId);
+      console.log('Deleting message:', messageId, 'deleteForEveryone:', deleteForEveryone);
       
-      // Optimistically remove from UI immediately
-      setMessages(prev => {
-        const filtered = prev.filter(m => m.id !== messageId);
-        console.log('Messages after local delete:', filtered.length);
-        return filtered;
-      });
+      const message = messages.find(m => m.id === messageId);
+      if (!message) {
+        console.warn('Message not found:', messageId);
+        return;
+      }
+
+      // Always delete from database when "delete for everyone" is checked
+      // This ensures the message is removed from Supabase and synced to all users via real-time
+      if (deleteForEveryone) {
+        // Delete from database - this will remove it for everyone via real-time subscription
+        await messageService.delete(messageId);
+        console.log('Message deleted from database (for everyone)');
+        
+        // Optimistically remove from UI immediately
+        setMessages(prev => prev.filter(m => m.id !== messageId));
+      } else {
+        // Delete only for sender - still delete from database but mark as deleted for sender
+        // For now, we'll delete from database to ensure consistency
+        // In a future enhancement, you could add a "deleted_for" field to track per-user deletions
+        await messageService.delete(messageId);
+        console.log('Message deleted from database (sender only)');
+        
+        // Remove from UI
+        setMessages(prev => prev.filter(m => m.id !== messageId));
+      }
       
-      // Delete from database
-      await messageService.delete(messageId);
-      console.log('Message deleted from database successfully');
-      // Real-time subscription will also update, but we've already updated locally
+      // Real-time subscription will handle updates and sync to all connected clients
     } catch (error) {
-      console.error('Failed to delete message:', error);
+      console.error('Failed to delete message from database:', error);
       // Re-add the message if delete failed
       const message = messages.find(m => m.id === messageId);
       if (message) {
         setMessages(prev => [...prev, message]);
       }
       alert('Failed to delete message. Please check console for details.');
+    }
+  };
+
+  const handleClearHistory = async (receiverId: string | undefined, groupId: string | undefined, clearForEveryone: boolean) => {
+    if (!currentUser || !currentProjectId) return;
+    
+    try {
+      console.log('Clearing chat history:', { receiverId, groupId, clearForEveryone });
+      
+      // Get all messages that will be deleted
+      const messagesToDelete = messages.filter(m => {
+        if (groupId) {
+          return m.groupId === groupId;
+        } else if (receiverId) {
+          return (m.senderId === currentUser.id && m.receiverId === receiverId) ||
+                 (m.senderId === receiverId && m.receiverId === currentUser.id);
+        }
+        return false;
+      });
+
+      console.log(`Deleting ${messagesToDelete.length} messages from database`);
+
+      // Delete all messages from database
+      await messageService.deleteByConversation(
+        currentProjectId,
+        currentUser.id,
+        receiverId,
+        groupId,
+        clearForEveryone
+      );
+
+      console.log('Chat history cleared successfully from database');
+
+      // Remove messages from UI
+      setMessages(prev => {
+        if (groupId) {
+          return prev.filter(m => m.groupId !== groupId);
+        } else if (receiverId) {
+          return prev.filter(m => 
+            !((m.senderId === currentUser.id && m.receiverId === receiverId) ||
+              (m.senderId === receiverId && m.receiverId === currentUser.id))
+          );
+        }
+        return prev;
+      });
+
+      // Real-time subscription will also update, but we've already updated locally
+    } catch (error) {
+      console.error('Failed to clear chat history:', error);
+      alert('Failed to clear chat history. Please check console for details.');
     }
   };
 
@@ -1530,6 +1706,24 @@ const App: React.FC = () => {
     }
   };
 
+  const handleMarkAllNotificationsAsRead = async () => {
+    if (!currentUser) return;
+    try {
+      const unreadNotifs = userNotifications.filter(n => !n.read);
+      // Mark all unread notifications as read
+      for (const notif of unreadNotifs) {
+        await notificationService.update(notif.id, { read: true });
+      }
+      // Real-time subscription will update the state automatically
+    } catch (error) {
+      console.error('Failed to mark all notifications as read:', error);
+      // Fallback: update local state
+      setNotifications(prev => prev.map(n => 
+        n.userId === currentUser.id && !n.read ? { ...n, read: true } : n
+      ));
+    }
+  };
+
   const handleClearAllNotifications = async () => {
     if (!currentUser) return;
     try {
@@ -1558,6 +1752,101 @@ const App: React.FC = () => {
   }, [scopedNotifications, currentUser]);
 
   const unreadNotifCount = useMemo(() => userNotifications.filter(n => !n.read).length, [userNotifications]);
+
+  // Calculate unread message count (direct messages and group messages)
+  const unreadMessageCount = useMemo(() => {
+    if (!currentUser) return 0;
+    return scopedMessages.filter(m => {
+      // Direct messages where current user is the receiver and status is not 'seen'
+      if (m.receiverId === currentUser.id && m.status !== 'seen') {
+        return true;
+      }
+      // Group messages where current user is not the sender and status is not 'seen'
+      // Check if user is a member of the group
+      if (m.groupId && m.senderId !== currentUser.id && m.status !== 'seen') {
+        const group = scopedGroups.find(g => g.id === m.groupId);
+        return group?.members.includes(currentUser.id) || false;
+      }
+      return false;
+    }).length;
+  }, [scopedMessages, scopedGroups, currentUser]);
+
+  // Automatically mark all notifications as read when notifications view is opened
+  useEffect(() => {
+    if (view === 'notifications' && currentUser) {
+      // Get current unread notifications for the user
+      const unreadNotifs = notifications.filter(n => 
+        n.userId === currentUser.id && 
+        n.projectId === currentProjectId && 
+        !n.read
+      );
+      
+      if (unreadNotifs.length > 0) {
+        // Mark all unread notifications as read
+        const markAllAsRead = async () => {
+          try {
+            for (const notif of unreadNotifs) {
+              await notificationService.update(notif.id, { read: true });
+            }
+            // Real-time subscription will update the state automatically
+          } catch (error) {
+            console.error('Failed to mark all notifications as read:', error);
+            // Fallback: update local state
+            setNotifications(prev => prev.map(n => 
+              n.userId === currentUser.id && n.projectId === currentProjectId && !n.read 
+                ? { ...n, read: true } 
+                : n
+            ));
+          }
+        };
+        markAllAsRead();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, currentUser, currentProjectId]); // Only trigger when view changes to notifications
+
+  // Automatically mark all unread messages as seen when chat view is opened
+  useEffect(() => {
+    if (view === 'chat' && currentUser) {
+      // Get all unread messages for the current user
+      const unreadMessages = scopedMessages.filter(m => {
+        // Direct messages where current user is the receiver and status is not 'seen'
+        if (m.receiverId === currentUser.id && m.status !== 'seen') {
+          return true;
+        }
+        // Group messages where current user is not the sender and status is not 'seen'
+        // Check if user is a member of the group
+        if (m.groupId && m.senderId !== currentUser.id && m.status !== 'seen') {
+          const group = scopedGroups.find(g => g.id === m.groupId);
+          return group?.members.includes(currentUser.id) || false;
+        }
+        return false;
+      });
+
+      if (unreadMessages.length > 0) {
+        // Store unread message IDs for fallback
+        const unreadMessageIds = new Set(unreadMessages.map(m => m.id));
+        
+        // Mark all unread messages as seen
+        const markAllAsSeen = async () => {
+          try {
+            for (const msg of unreadMessages) {
+              await messageService.update(msg.id, { status: 'seen' });
+            }
+            // Real-time subscription will update the state automatically
+          } catch (error) {
+            console.error('Failed to mark all messages as seen:', error);
+            // Fallback: update local state for the unread messages we found
+            setMessages(prev => prev.map(m => 
+              unreadMessageIds.has(m.id) ? { ...m, status: 'seen' as const } : m
+            ));
+          }
+        };
+        markAllAsSeen();
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, currentUser, currentProjectId]); // Only trigger when view changes to chat
 
   const filteredTasks = useMemo(() => {
     if (!currentUser) return [];
@@ -1632,10 +1921,19 @@ const App: React.FC = () => {
           onDeletePost={handleDeletePost}
           projectDomain={projectDomain}
         />;
+      case 'calendar':
+        return currentUser ? <CalendarView
+          currentUser={currentUser}
+          events={calendarEvents}
+          allUsers={scopedUsers}
+          onCreateEvent={handleCreateCalendarEvent}
+          onUpdateEvent={handleUpdateCalendarEvent}
+          onDeleteEvent={handleDeleteCalendarEvent}
+        /> : null;
       case 'emails':
         return currentUser ? <EmailsView 
           currentUser={currentUser} 
-          emails={scopedEmails} 
+          emails={scopedEmails}
           domain={projectDomain}
           onSendEmail={handleSendEmail}
           onToggleStar={handleToggleEmailStar}
@@ -1657,6 +1955,7 @@ const App: React.FC = () => {
           groups={scopedGroups}
           onSendMessage={handleSendMessage}
           onDeleteMessage={handleDeleteMessage}
+          onClearHistory={handleClearHistory}
           onCreateGroup={handleCreateGroup}
           onJoinGroup={handleJoinGroup}
           onStartCall={handleStartCall}
@@ -1784,6 +2083,7 @@ const App: React.FC = () => {
             )}
           </div>
           <div className="flex items-center gap-2">
+            <button onClick={() => setView('calendar')} className={`p-2.5 shadow-sm border rounded-2xl transition-all ${view === 'calendar' ? 'bg-orange-600 text-white border-orange-600' : 'bg-white border-slate-100 text-slate-600'}`} title="Calendar"><Calendar size={18} /></button>
             <button onClick={() => setView('emails')} className={`p-2.5 shadow-sm border rounded-2xl transition-all ${view === 'emails' ? 'bg-orange-600 text-white border-orange-600' : 'bg-white border-slate-100 text-slate-600'}`}><Mail size={18} /></button>
             <button onClick={() => setView('complaints')} className={`p-2.5 shadow-sm border rounded-2xl transition-all ${view === 'complaints' ? 'bg-orange-600 text-white border-orange-600' : 'bg-white border-slate-100 text-slate-600'}`}><HelpCircle size={18} /></button>
             <button onClick={() => setView('notifications')} className={`p-2.5 shadow-sm border rounded-2xl relative transition-all ${view === 'notifications' ? 'bg-orange-600 text-white border-orange-600' : 'bg-white border-slate-100 text-slate-600'}`}><Bell size={18} />{unreadNotifCount > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-600 text-white text-[8px] flex items-center justify-center rounded-full font-bold border-2 border-white">{unreadNotifCount}</span>}</button>
@@ -1808,7 +2108,7 @@ const App: React.FC = () => {
         <button onClick={() => setView('tasks')} className={`p-2 transition-all flex flex-col items-center gap-1 ${view === 'tasks' ? 'text-orange-600 scale-110' : 'text-slate-400'}`}><ListTodo size={20} /><span className="text-[8px] font-bold uppercase tracking-widest">Flow</span></button>
         <button onClick={() => setView('feed')} className={`p-2 transition-all flex flex-col items-center gap-1 ${view === 'feed' ? 'text-orange-600 scale-110' : 'text-slate-400'}`}><Globe size={20} /><span className="text-[8px] font-bold uppercase tracking-widest">Social</span></button>
         {currentUser && <div className="relative"><button onClick={() => view === 'feed' ? setIsPostModalOpen(true) : setIsModalOpen(true)} className="w-12 h-12 bg-orange-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-orange-200 -mt-10 border-4 border-white"><Plus size={24} /></button></div>}
-        <button onClick={() => setView('chat')} className={`p-2 transition-all flex flex-col items-center gap-1 ${view === 'chat' ? 'text-orange-600 scale-110' : 'text-slate-400'}`}><MessageCircle size={20} /><span className="text-[8px] font-bold uppercase tracking-widest">Chat</span></button>
+        <button onClick={() => setView('chat')} className={`p-2 transition-all flex flex-col items-center gap-1 relative ${view === 'chat' ? 'text-orange-600 scale-110' : 'text-slate-400'}`}><MessageCircle size={20} />{unreadMessageCount > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-600 text-white text-[8px] flex items-center justify-center rounded-full font-bold border-2 border-white">{unreadMessageCount}</span>}<span className="text-[8px] font-bold uppercase tracking-widest">Chat</span></button>
         <button onClick={() => setView('profile')} className={`p-2 transition-all flex flex-col items-center gap-1 ${view === 'profile' ? 'text-orange-600 scale-110' : 'text-slate-400'}`}><UserIcon size={20} /><span className="text-[8px] font-bold uppercase tracking-widest">ID</span></button>
       </nav>
 

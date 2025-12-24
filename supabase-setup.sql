@@ -161,6 +161,22 @@ CREATE TABLE IF NOT EXISTS emails (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Step 11.5: Create Calendar Events table
+CREATE TABLE IF NOT EXISTS calendar_events (
+  id TEXT PRIMARY KEY,
+  project_id TEXT REFERENCES projects(id) NOT NULL,
+  user_id TEXT REFERENCES users(id) NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  start_date TIMESTAMP WITH TIME ZONE NOT NULL,
+  end_date TIMESTAMP WITH TIME ZONE NOT NULL,
+  location TEXT,
+  attendees JSONB DEFAULT '[]'::jsonb,
+  color TEXT DEFAULT '#f97316',
+  all_day BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Step 12: Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id);
 CREATE INDEX IF NOT EXISTS idx_notes_project_id ON notes(project_id);
@@ -170,6 +186,9 @@ CREATE INDEX IF NOT EXISTS idx_notifications_user_project ON notifications(user_
 CREATE INDEX IF NOT EXISTS idx_messages_project_id ON messages(project_id);
 CREATE INDEX IF NOT EXISTS idx_groups_project_id ON groups(project_id);
 CREATE INDEX IF NOT EXISTS idx_emails_project_id ON emails(project_id);
+CREATE INDEX IF NOT EXISTS idx_calendar_events_project_id ON calendar_events(project_id);
+CREATE INDEX IF NOT EXISTS idx_calendar_events_user_id ON calendar_events(user_id);
+CREATE INDEX IF NOT EXISTS idx_calendar_events_start_date ON calendar_events(start_date);
 CREATE INDEX IF NOT EXISTS idx_users_project_id ON users(project_id);
 
 -- Step 13: Disable Row Level Security (RLS) - FOR TESTING ONLY
@@ -185,6 +204,7 @@ ALTER TABLE notifications DISABLE ROW LEVEL SECURITY;
 ALTER TABLE messages DISABLE ROW LEVEL SECURITY;
 ALTER TABLE groups DISABLE ROW LEVEL SECURITY;
 ALTER TABLE emails DISABLE ROW LEVEL SECURITY;
+ALTER TABLE calendar_events DISABLE ROW LEVEL SECURITY;
 
 -- Step 14: Insert default project
 INSERT INTO projects (id, name, manager_name, domain, created_at)

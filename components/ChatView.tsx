@@ -8,7 +8,8 @@ import {
   Search, Send, ArrowLeft, User as UserIcon, MessageCircle, 
   Users, Plus, Hash, Trash2, Paperclip, Video, Phone, 
   X, ExternalLink, Image as ImageIcon, FileText, 
-  Mic, Camera, PhoneOff, Link as LinkIcon, Check, CheckCheck, Reply, AtSign 
+  Mic, Camera, PhoneOff, Link as LinkIcon, Check, CheckCheck, Reply, AtSign,
+  Download, Maximize2, Trash
 } from 'lucide-react';
 
 interface ChatViewProps {
@@ -17,7 +18,8 @@ interface ChatViewProps {
   messages: Message[];
   groups: Group[];
   onSendMessage: (receiverId: string | undefined, groupId: string | undefined, text: string, attachment?: MessageAttachment, replyToId?: string) => void;
-  onDeleteMessage: (messageId: string) => void;
+  onDeleteMessage: (messageId: string, deleteForEveryone?: boolean) => void;
+  onClearHistory: (receiverId: string | undefined, groupId: string | undefined, clearForEveryone: boolean) => void;
   onCreateGroup: (name: string, description: string) => void;
   onJoinGroup: (groupId: string) => void;
   onStartCall: (type: 'audio' | 'video', targetId: string, isGroup: boolean) => void;
@@ -31,6 +33,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   groups,
   onSendMessage,
   onDeleteMessage,
+  onClearHistory,
   onCreateGroup,
   onJoinGroup,
   onStartCall,
@@ -53,6 +56,11 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [typingUsers, setTypingUsers] = useState<{ [key: string]: string }>({}); // userId -> userName
   const [isTyping, setIsTyping] = useState(false);
+  const [messageToDelete, setMessageToDelete] = useState<Message | null>(null);
+  const [deleteForEveryone, setDeleteForEveryone] = useState(false);
+  const [viewingMedia, setViewingMedia] = useState<{ url: string; type: 'image' | 'video'; name: string } | null>(null);
+  const [showClearHistoryModal, setShowClearHistoryModal] = useState(false);
+  const [clearHistoryForEveryone, setClearHistoryForEveryone] = useState(false);
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -73,6 +81,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [activeChatUser, activeGroup, messages]);
+
+  // Auto-save media to gallery when viewing on mobile
+  useEffect(() => {
+    if (viewingMedia && /Mobile|Android|iPhone|iPad/i.test(navigator.userAgent)) {
+      handleAutoSaveMedia(viewingMedia.url, viewingMedia.name, viewingMedia.type).catch(console.error);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewingMedia]);
 
   // Set up WebRTC and signaling
   useEffect(() => {
@@ -325,7 +341,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   const filteredGroups = useMemo(() => {
     const query = searchQuery.toLowerCase();
     return groups.filter(g => 
-      g.name.toLowerCase().includes(query) || g.description.toLowerCase().includes(query)
+      g.name.toLowerCase().includes(query) || (g.description?.toLowerCase() || '').includes(query)
     );
   }, [groups, searchQuery]);
 
@@ -923,6 +939,31 @@ export const ChatView: React.FC<ChatViewProps> = ({
     return map;
   }, [allUsers]);
 
+  // Helper function to render user avatar (profile photo or initial)
+  const renderUserAvatar = (user: User, size: 'sm' | 'md' | 'lg' = 'md') => {
+    const sizeClasses = {
+      sm: 'w-10 h-10',
+      md: 'w-12 h-12',
+      lg: 'w-16 h-16'
+    };
+    
+    if (user.profilePhoto) {
+      return (
+        <img 
+          src={user.profilePhoto} 
+          alt={user.name}
+          className={`${sizeClasses[size]} rounded-full object-cover border-2 border-slate-100`}
+        />
+      );
+    }
+    
+    return (
+      <div className={`${sizeClasses[size]} bg-orange-100 text-orange-600 rounded-full flex items-center justify-center font-black`}>
+        {user.name.charAt(0)}
+      </div>
+    );
+  };
+
   const renderStatus = (status?: Message['status']) => {
     if (!status) return null;
     switch (status) {
@@ -949,6 +990,221 @@ export const ChatView: React.FC<ChatViewProps> = ({
       return <span key={i}>{part}</span>;
     });
   };
+
+  // Auto-save media to mobile gallery
+  const handleAutoSaveMedia = async (dataUrl: string, filename: string, type: 'image' | 'video') => {
+    try {
+      // Convert data URL to blob
+      const response = await fetch(dataUrl);
+      const blob = await response.blob();
+      
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      // On mobile devices, this will trigger the save to gallery
+      // For better mobile support, we can also try using the File System Access API or Web Share API
+      if ('share' in navigator && /Mobile|Android|iPhone|iPad/i.test(navigator.userAgent)) {
+        const file = new File([blob], filename, { type: type === 'image' ? 'image/jpeg' : 'video/mp4' });
+        try {
+          await navigator.share({
+            files: [file],
+            title: filename
+          });
+        } catch (shareError) {
+          // Share API failed, download will still work
+          console.log('Share API not available, using download');
+        }
+      }
+    } catch (error) {
+      console.error('Failed to save media:', error);
+      // Fallback: open in new tab
+      window.open(dataUrl, '_blank');
+    }
+  };
+
+  const handleConfirmDelete = () => {
+    if (messageToDelete) {
+      onDeleteMessage(messageToDelete.id, deleteForEveryone);
+      setMessageToDelete(null);
+      setDeleteForEveryone(false);
+    }
+  };
+
+  const handleConfirmClearHistory = () => {
+    if (activeChatUser || activeGroup) {
+      onClearHistory(activeChatUser?.id, activeGroup?.id, clearHistoryForEveryone);
+      setShowClearHistoryModal(false);
+      setClearHistoryForEveryone(false);
+    }
+  };
+
+  // Clear History Modal
+  if (showClearHistoryModal) {
+    return (
+      <div className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in zoom-in">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-rose-100 rounded-full flex items-center justify-center">
+                <Trash2 size={24} className="text-rose-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-black text-slate-800">Clear Chat History</h3>
+                <p className="text-xs text-slate-500 font-bold">This action cannot be undone</p>
+              </div>
+            </div>
+            <button 
+              onClick={() => { setShowClearHistoryModal(false); setClearHistoryForEveryone(false); }}
+              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400"
+            >
+              <X size={20} />
+            </button>
+          </div>
+          
+          <p className="text-sm text-slate-600 mb-4">
+            Are you sure you want to clear all messages from this chat? All messages, images, and videos will be permanently deleted.
+          </p>
+
+          <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl mb-6">
+            <input
+              type="checkbox"
+              checked={clearHistoryForEveryone}
+              onChange={(e) => setClearHistoryForEveryone(e.target.checked)}
+              className="w-4 h-4 rounded border-slate-300 text-orange-600 focus:ring-orange-500"
+              id="clearForEveryone"
+            />
+            <label 
+              htmlFor="clearForEveryone" 
+              className="text-sm font-bold text-slate-700 cursor-pointer flex-1"
+            >
+              Clear for everyone
+              <span className="block text-xs text-slate-500 font-normal mt-0.5">
+                This will delete all messages for both you and {activeChatUser ? activeChatUser.name : activeGroup?.name}
+              </span>
+            </label>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => { setShowClearHistoryModal(false); setClearHistoryForEveryone(false); }}
+              className="flex-1 py-3 px-4 bg-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-300 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleConfirmClearHistory}
+              className="flex-1 py-3 px-4 bg-rose-600 text-white font-bold rounded-xl hover:bg-rose-700 transition-colors"
+            >
+              Clear History
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Delete Message Modal
+  if (messageToDelete) {
+    return (
+      <div className="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl animate-in zoom-in">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-black text-slate-800">Delete Message</h3>
+            <button 
+              onClick={() => { setMessageToDelete(null); setDeleteForEveryone(false); }}
+              className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400"
+            >
+              <X size={20} />
+            </button>
+          </div>
+          
+          <p className="text-sm text-slate-600 mb-4">
+            Are you sure you want to delete this message?
+          </p>
+
+          <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl mb-6">
+            <input
+              type="checkbox"
+              checked={deleteForEveryone}
+              onChange={(e) => setDeleteForEveryone(e.target.checked)}
+              className="w-4 h-4 rounded border-slate-300 text-orange-600 focus:ring-orange-500"
+              id="deleteForEveryone"
+            />
+            <label 
+              htmlFor="deleteForEveryone" 
+              className="text-sm font-bold text-slate-700 cursor-pointer flex-1"
+            >
+              Delete for everyone
+              <span className="block text-xs text-slate-500 font-normal mt-0.5">
+                This will delete the message for both you and the recipient
+              </span>
+            </label>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => { setMessageToDelete(null); setDeleteForEveryone(false); }}
+              className="flex-1 py-3 px-4 bg-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-300 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleConfirmDelete}
+              className="flex-1 py-3 px-4 bg-rose-600 text-white font-bold rounded-xl hover:bg-rose-700 transition-colors"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Image/Video Viewer Modal
+  if (viewingMedia) {
+    return (
+      <div className="fixed inset-0 z-[200] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="relative w-full h-full flex items-center justify-center">
+          <button
+            onClick={() => setViewingMedia(null)}
+            className="absolute top-4 right-4 p-3 bg-white/10 hover:bg-white/20 text-white rounded-full backdrop-blur-sm z-10"
+          >
+            <X size={24} />
+          </button>
+          {viewingMedia.type === 'image' ? (
+            <img
+              src={viewingMedia.url}
+              alt={viewingMedia.name}
+              className="max-w-full max-h-full object-contain"
+            />
+          ) : (
+            <video
+              src={viewingMedia.url}
+              controls
+              autoPlay
+              className="max-w-full max-h-full"
+            >
+              Your browser does not support the video tag.
+            </video>
+          )}
+          <button
+            onClick={() => handleAutoSaveMedia(viewingMedia.url, viewingMedia.name, viewingMedia.type)}
+            className="absolute bottom-4 right-4 p-3 bg-white/10 hover:bg-white/20 text-white rounded-full backdrop-blur-sm"
+            title="Save to gallery"
+          >
+            <Download size={24} />
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Permission Modal
   if (showPermissionModal) {
@@ -1107,8 +1363,18 @@ export const ChatView: React.FC<ChatViewProps> = ({
     return (
       <div className="fixed inset-0 z-[100] bg-slate-900/95 backdrop-blur-sm flex flex-col items-center justify-center p-10 animate-in fade-in zoom-in">
         <div className="text-center">
-          <div className="w-32 h-32 bg-orange-600 rounded-full mx-auto flex items-center justify-center mb-8 ring-8 ring-orange-600/30 animate-pulse">
-            {incomingCall.type === 'video' ? <Camera size={48} className="text-white" /> : <Phone size={48} className="text-white" />}
+          <div className="w-32 h-32 rounded-full mx-auto mb-8 ring-8 ring-orange-600/30 animate-pulse overflow-hidden flex items-center justify-center bg-orange-600">
+            {caller && caller.profilePhoto ? (
+              <img 
+                src={caller.profilePhoto} 
+                alt={caller.name}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                {incomingCall.type === 'video' ? <Camera size={48} className="text-white" /> : <Phone size={48} className="text-white" />}
+              </div>
+            )}
           </div>
           <h2 className="text-3xl font-bold text-white mb-2">
             {caller?.name || 'Unknown User'}
@@ -1211,9 +1477,13 @@ export const ChatView: React.FC<ChatViewProps> = ({
               <ArrowLeft size={18} />
             </button>
             <div className="flex items-center gap-2">
-              <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold shadow-sm ${activeGroup ? 'bg-slate-900 text-white' : 'bg-orange-100 text-orange-600'}`}>
-                {initial}
-              </div>
+              {activeChatUser ? (
+                renderUserAvatar(activeChatUser, 'sm')
+              ) : (
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold shadow-sm bg-slate-900 text-white`}>
+                  #
+                </div>
+              )}
               <div>
                 <h3 className="text-sm font-bold text-slate-800">{title}</h3>
                 <p className="text-[10px] text-slate-400 font-bold uppercase">{subtitle}</p>
@@ -1222,6 +1492,13 @@ export const ChatView: React.FC<ChatViewProps> = ({
           </div>
           
           <div className="flex items-center gap-1">
+            <button 
+              onClick={() => setShowClearHistoryModal(true)}
+              className="p-2.5 text-slate-400 hover:text-rose-600 transition-colors"
+              title="Clear chat history"
+            >
+              <Trash size={18} />
+            </button>
             <button onClick={() => handleCall('audio')} className="p-2.5 text-slate-400 hover:text-orange-600 transition-colors">
               <Phone size={18} />
             </button>
@@ -1259,24 +1536,58 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   {msg.attachment && (
                     <div className="mb-1">
                       {msg.attachment.type.startsWith('image/') ? (
-                        <div className="rounded-xl overflow-hidden max-w-[250px] shadow-md">
+                        <div className="rounded-xl overflow-hidden max-w-[250px] shadow-md relative group">
                           <img 
                             src={msg.attachment.data} 
                             alt={msg.attachment.name}
                             className="w-full h-auto object-cover cursor-pointer"
-                            onClick={() => window.open(msg.attachment!.data, '_blank')}
+                            onClick={() => {
+                              setViewingMedia({
+                                url: msg.attachment!.data,
+                                type: 'image',
+                                name: msg.attachment!.name
+                              });
+                            }}
                           />
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleAutoSaveMedia(msg.attachment!.data, msg.attachment!.name, 'image');
+                            }}
+                            className="absolute top-2 right-2 p-2 bg-black/50 hover:bg-black/70 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="Save to gallery"
+                          >
+                            <Download size={14} />
+                          </button>
                         </div>
                       ) : msg.attachment.type.startsWith('video/') ? (
-                        <div className="rounded-xl overflow-hidden max-w-[250px] shadow-md">
+                        <div className="rounded-xl overflow-hidden max-w-[250px] shadow-md relative group">
                           <video 
                             src={msg.attachment.data} 
                             controls
                             className="w-full h-auto"
                             style={{ maxHeight: '300px' }}
+                            onDoubleClick={(e) => {
+                              e.stopPropagation();
+                              setViewingMedia({
+                                url: msg.attachment!.data,
+                                type: 'video',
+                                name: msg.attachment!.name
+                              });
+                            }}
                           >
                             Your browser does not support the video tag.
                           </video>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleAutoSaveMedia(msg.attachment!.data, msg.attachment!.name, 'video');
+                            }}
+                            className="absolute top-2 right-2 p-2 bg-black/50 hover:bg-black/70 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="Save to gallery"
+                          >
+                            <Download size={14} />
+                          </button>
                         </div>
                       ) : (
                         <div className={`p-3 rounded-xl flex items-center gap-3 max-w-[250px] ${isMe ? 'bg-white/10' : 'bg-slate-50 border border-slate-100'}`}>
@@ -1332,9 +1643,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     </button>
                     <button 
                       onClick={() => {
-                        if (window.confirm('Are you sure you want to delete this message?')) {
-                          onDeleteMessage(msg.id);
-                        }
+                        setMessageToDelete(msg);
+                        setDeleteForEveryone(false);
                       }}
                       className={`p-1.5 transition-colors ${isMe ? 'text-rose-300 hover:text-rose-500' : 'text-slate-400 hover:text-rose-500'}`}
                       title="Delete"
@@ -1548,9 +1858,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
             filteredUsers.map(user => (
               <button key={user.id} onClick={() => setActiveChatUser(user)} className="w-full bg-white p-4 rounded-2xl border border-slate-50 flex items-center justify-between group active:scale-[0.98] transition-all">
                 <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-orange-50 text-orange-600 rounded-full flex items-center justify-center font-black">
-                    {user.name.charAt(0)}
-                  </div>
+                  {renderUserAvatar(user, 'md')}
                   <div className="text-left">
                     <h3 className="text-sm font-bold text-slate-800">{user.name}</h3>
                     <p className="text-[10px] text-slate-400 font-bold uppercase">@{user.username}</p>
@@ -1565,9 +1873,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
               {recentDirectChats.map(user => (
                 <button key={user.id} onClick={() => setActiveChatUser(user)} className="w-full bg-white p-4 rounded-2xl border border-slate-50 flex items-center justify-between active:scale-[0.98] transition-all">
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center font-black">
-                      {user.name.charAt(0)}
-                    </div>
+                    {renderUserAvatar(user, 'md')}
                     <div className="text-left">
                       <h3 className="text-sm font-bold text-slate-800">{user.name}</h3>
                       <p className="text-[10px] text-slate-400 font-bold uppercase">@{user.username}</p>

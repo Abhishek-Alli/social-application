@@ -189,4 +189,19 @@ export interface Group {
   activeCall?: CallInfo;
 }
 
-export type ViewType = 'tasks' | 'upcoming' | 'notes' | 'analytics' | 'team' | 'profile' | 'complaints' | 'notifications' | 'chat' | 'feed' | 'projects' | 'emails';
+export interface CalendarEvent {
+  id: string;
+  projectId: string;
+  userId: string; // Event creator/owner
+  title: string;
+  description?: string;
+  startDate: string; // ISO datetime
+  endDate: string; // ISO datetime
+  location?: string;
+  attendees?: string[]; // User IDs
+  color?: string; // Event color
+  allDay?: boolean;
+  createdAt: string;
+}
+
+export type ViewType = 'tasks' | 'upcoming' | 'notes' | 'analytics' | 'team' | 'profile' | 'complaints' | 'notifications' | 'chat' | 'feed' | 'projects' | 'emails' | 'calendar';

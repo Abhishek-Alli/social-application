@@ -81,6 +81,14 @@ BEGIN
     ALTER PUBLICATION supabase_realtime ADD TABLE groups;
   END IF;
 
+  -- Enable Realtime for Calendar Events
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables 
+    WHERE pubname = 'supabase_realtime' AND tablename = 'calendar_events'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE calendar_events;
+  END IF;
+
   -- Enable Realtime for Users (optional - for user updates)
   IF NOT EXISTS (
     SELECT 1 FROM pg_publication_tables 
@@ -120,7 +128,7 @@ WHERE schemaname = 'public'
   AND tablename IN (
     'tasks', 'posts', 'messages', 'notifications', 
     'notes', 'complaints', 'emails', 'groups', 
-    'users', 'projects'
+    'calendar_events', 'users', 'projects'
   )
 ORDER BY tablename;
 
@@ -137,5 +145,6 @@ ORDER BY tablename;
 -- - Complaints are submitted/resolved
 -- - Emails are sent
 -- - Groups are created/updated
+-- - Calendar events are created/updated/deleted
 -- ============================================
 

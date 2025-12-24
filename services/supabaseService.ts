@@ -10,7 +10,8 @@ import {
   Notification, 
   Message, 
   Group, 
-  Email 
+  Email,
+  CalendarEvent 
 } from '../types';
 
 export const supabase = createClient(supabaseConfig.url, supabaseConfig.anonKey);
@@ -592,6 +593,62 @@ export const messageService = {
       throw error;
     }
     console.log('Message deleted successfully from database');
+  },
+
+  async deleteByConversation(
+    projectId: string,
+    senderId: string,
+    receiverId?: string,
+    groupId?: string,
+    clearForEveryone: boolean = false
+  ): Promise<void> {
+    console.log('Deleting messages by conversation:', { projectId, senderId, receiverId, groupId, clearForEveryone });
+    
+    if (groupId) {
+      // Group chat - delete all messages in the group
+      const { error } = await supabase
+        .from('messages')
+        .delete()
+        .eq('project_id', projectId)
+        .eq('group_id', groupId);
+      
+      if (error) {
+        console.error('Supabase bulk delete error:', error);
+        throw error;
+      }
+    } else if (receiverId) {
+      // Direct message - delete messages between sender and receiver
+      // Delete messages where sender is current user and receiver is the other user
+      // OR sender is the other user and receiver is current user
+      // We need to delete in two separate queries or use a more complex filter
+      const { error: error1 } = await supabase
+        .from('messages')
+        .delete()
+        .eq('project_id', projectId)
+        .eq('sender_id', senderId)
+        .eq('receiver_id', receiverId);
+      
+      if (error1) {
+        console.error('Supabase bulk delete error (first query):', error1);
+        throw error1;
+      }
+
+      const { error: error2 } = await supabase
+        .from('messages')
+        .delete()
+        .eq('project_id', projectId)
+        .eq('sender_id', receiverId)
+        .eq('receiver_id', senderId);
+      
+      if (error2) {
+        console.error('Supabase bulk delete error (second query):', error2);
+        throw error2;
+      }
+    } else {
+      throw new Error('Either receiverId or groupId must be provided');
+    }
+
+    console.log('Messages deleted successfully from database');
   }
 };
 
@@ -720,6 +777,114 @@ export const emailService = {
   async delete(id: string): Promise<void> {
     const { error } = await supabase
       .from('emails')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+  }
+};
+
+// Calendar Event Operations
+export const calendarService = {
+  async getByProject(projectId: string): Promise<CalendarEvent[]> {
+    const { data, error } = await supabase
+      .from('calendar_events')
+      .select('*')
+      .eq('project_id', projectId)
+      .order('start_date', { ascending: true });
+    if (error) throw error;
+    return (data || []).map((e: any) => ({
+      id: e.id,
+      projectId: e.project_id || e.projectId,
+      userId: e.user_id || e.userId,
+      title: e.title,
+      description: e.description,
+      startDate: e.start_date || e.startDate,
+      endDate: e.end_date || e.endDate,
+      location: e.location,
+      attendees: e.attendees || [],
+      color: e.color || '#f97316',
+      allDay: e.all_day || e.allDay || false,
+      createdAt: e.created_at || e.createdAt
+    }));
+  },
+
+  async create(event: Omit<CalendarEvent, 'id' | 'createdAt' | 'projectId' | 'userId'> & { projectId: string; userId: string }): Promise<CalendarEvent> {
+    const eventId = 'cal_' + Date.now().toString() + Math.random().toString(36).substring(2, 11);
+    const { data, error } = await supabase
+      .from('calendar_events')
+      .insert({
+        id: eventId,
+        project_id: event.projectId,
+        user_id: event.userId,
+        title: event.title,
+        description: event.description || null,
+        start_date: event.startDate,
+        end_date: event.endDate,
+        location: event.location || null,
+        attendees: event.attendees || [],
+        color: event.color || '#f97316',
+        all_day: event.allDay || false,
+        created_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return {
+      id: data.id,
+      projectId: data.project_id || data.projectId,
+      userId: data.user_id || data.userId,
+      title: data.title,
+      description: data.description,
+      startDate: data.start_date || data.startDate,
+      endDate: data.end_date || data.endDate,
+      location: data.location,
+      attendees: data.attendees || [],
+      color: data.color || '#f97316',
+      allDay: data.all_day || data.allDay || false,
+      createdAt: data.created_at || data.createdAt
+    };
+  },
+
+  async update(id: string, updates: Partial<CalendarEvent>): Promise<CalendarEvent> {
+    const updateData: any = { ...updates };
+    if (updates.projectId) updateData.project_id = updates.projectId;
+    if (updates.userId) updateData.user_id = updates.userId;
+    if (updates.startDate) updateData.start_date = updates.startDate;
+    if (updates.endDate) updateData.end_date = updates.endDate;
+    if (updates.allDay !== undefined) updateData.all_day = updates.allDay;
+    
+    delete updateData.projectId;
+    delete updateData.userId;
+    delete updateData.startDate;
+    delete updateData.endDate;
+    delete updateData.allDay;
+    
+    const { data, error } = await supabase
+      .from('calendar_events')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return {
+      id: data.id,
+      projectId: data.project_id || data.projectId,
+      userId: data.user_id || data.userId,
+      title: data.title,
+      description: data.description,
+      startDate: data.start_date || data.startDate,
+      endDate: data.end_date || data.endDate,
+      location: data.location,
+      attendees: data.attendees || [],
+      color: data.color || '#f97316',
+      allDay: data.all_day || data.allDay || false,
+      createdAt: data.created_at || data.createdAt
+    };
+  },
+
+  async delete(id: string): Promise<void> {
+    const { error } = await supabase
+      .from('calendar_events')
       .delete()
       .eq('id', id);
     if (error) throw error;
