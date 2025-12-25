@@ -16,7 +16,8 @@ import {
   Survey,
   Poll,
   FeedbackForm,
-  FeedbackFormResponse
+  FeedbackFormResponse,
+  Connection
 } from '../types';
 
 // Singleton pattern to prevent multiple client instances during HMR
@@ -53,6 +54,8 @@ const mapDbUserToUser = (data: any): User => ({
   dob: data.dob || null,
   contactNo: data.contact_no || null,
   profilePhoto: data.profile_photo || null,
+  bio: data.bio || null,
+  backgroundImage: data.background_image || null,
   password: data.password || null,
   isTwoStepEnabled: data.is_two_step_enabled || false,
   isEmailVerified: data.is_email_verified || false,
@@ -101,6 +104,8 @@ export const userService = {
         dob: user.dob || null,
         contact_no: user.contactNo || null,
         profile_photo: user.profilePhoto || null,
+        bio: user.bio || null,
+        background_image: user.backgroundImage || null,
         password: user.password || null,
         is_two_step_enabled: user.isTwoStepEnabled || false,
         is_email_verified: user.isEmailVerified || false,
@@ -123,6 +128,8 @@ export const userService = {
     if (updates.subDepartment !== undefined) updateData.sub_department = updates.subDepartment;
     if (updates.contactNo !== undefined) updateData.contact_no = updates.contactNo;
     if (updates.profilePhoto !== undefined) updateData.profile_photo = updates.profilePhoto;
+    if (updates.bio !== undefined) updateData.bio = updates.bio;
+    if (updates.backgroundImage !== undefined) updateData.background_image = updates.backgroundImage;
     if (updates.isTwoStepEnabled !== undefined) updateData.is_two_step_enabled = updates.isTwoStepEnabled;
     if (updates.isEmailVerified !== undefined) updateData.is_email_verified = updates.isEmailVerified;
     if (updates.telegramUserId !== undefined) updateData.telegram_user_id = updates.telegramUserId;
@@ -136,6 +143,8 @@ export const userService = {
     delete updateData.subDepartment;
     delete updateData.contactNo;
     delete updateData.profilePhoto;
+    delete updateData.bio;
+    delete updateData.backgroundImage;
     delete updateData.isTwoStepEnabled;
     delete updateData.isEmailVerified;
     delete updateData.telegramUserId;
@@ -1631,6 +1640,91 @@ export const feedbackFormService = {
   async deleteSubmission(id: string): Promise<void> {
     const { error } = await supabase
       .from('feedback_form_submissions')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+  }
+};
+
+// Connection Operations
+export const connectionService = {
+  async getByUser(userId: string): Promise<Connection[]> {
+    const { data, error } = await supabase
+      .from('connections')
+      .select('*')
+      .or(`user_id.eq.${userId},connected_user_id.eq.${userId}`)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data || []).map((c: any) => ({
+      id: c.id,
+      userId: c.user_id || c.userId,
+      connectedUserId: c.connected_user_id || c.connectedUserId,
+      status: c.status || 'pending',
+      createdAt: c.created_at || c.createdAt
+    }));
+  },
+
+  async getConnection(userId: string, connectedUserId: string): Promise<Connection | null> {
+    const { data, error } = await supabase
+      .from('connections')
+      .select('*')
+      .or(`and(user_id.eq.${userId},connected_user_id.eq.${connectedUserId}),and(user_id.eq.${connectedUserId},connected_user_id.eq.${userId})`)
+      .maybeSingle();
+    if (error) return null;
+    if (!data) return null;
+    return {
+      id: data.id,
+      userId: data.user_id || data.userId,
+      connectedUserId: data.connected_user_id || data.connectedUserId,
+      status: data.status || 'pending',
+      createdAt: data.created_at || data.createdAt
+    };
+  },
+
+  async create(connection: Omit<Connection, 'id' | 'createdAt'>): Promise<Connection> {
+    const connectionId = 'conn' + Date.now().toString() + Math.random().toString(36).substring(2, 11);
+    const { data, error } = await supabase
+      .from('connections')
+      .insert({
+        id: connectionId,
+        user_id: connection.userId,
+        connected_user_id: connection.connectedUserId,
+        status: connection.status || 'pending'
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return {
+      id: data.id,
+      userId: data.user_id || data.userId,
+      connectedUserId: data.connected_user_id || data.connectedUserId,
+      status: data.status || 'pending',
+      createdAt: data.created_at || data.createdAt
+    };
+  },
+
+  async update(id: string, updates: Partial<Connection>): Promise<Connection> {
+    const updateData: any = {};
+    if (updates.status !== undefined) updateData.status = updates.status;
+    const { data, error } = await supabase
+      .from('connections')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return {
+      id: data.id,
+      userId: data.user_id || data.userId,
+      connectedUserId: data.connected_user_id || data.connectedUserId,
+      status: data.status || 'pending',
+      createdAt: data.created_at || data.createdAt
+    };
+  },
+
+  async delete(id: string): Promise<void> {
+    const { error } = await supabase
+      .from('connections')
       .delete()
       .eq('id', id);
     if (error) throw error;

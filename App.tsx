@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Task, Priority, ViewType, Note, Role, User, Complaint, ComplaintAttachment, Notification, Message, Group, MessageAttachment, Post, Comment, Project, Email, CallInfo, CalendarEvent, Feedback, Survey, Poll, FeedbackForm, FeedbackFormResponse, FeedbackFormField } from './types';
+import { Task, Priority, ViewType, Note, Role, User, Complaint, ComplaintAttachment, Notification, Message, Group, MessageAttachment, Post, Comment, Project, Email, CallInfo, CalendarEvent, Feedback, Survey, Poll, FeedbackForm, FeedbackFormResponse, FeedbackFormField, Connection } from './types';
 import { 
   userService, 
   projectService, 
@@ -17,6 +17,7 @@ import {
   surveyService,
   pollService,
   feedbackFormService,
+  connectionService,
   supabase 
 } from './services/supabaseService';
 import { TaskCard } from './components/TaskCard';
@@ -78,6 +79,20 @@ const isMobileDevice = (): boolean => {
          window.innerWidth <= 768;
 };
 
+// Only save user ID to localStorage for "Remember Me" - full user data comes from Supabase
+const saveUserSession = (userId: string, rememberMe: boolean) => {
+  try {
+    if (rememberMe) {
+      localStorage.setItem('srj_user_id', userId);
+    } else {
+      sessionStorage.setItem('srj_user_id', userId);
+      localStorage.removeItem('srj_user_id');
+    }
+  } catch (error) {
+    console.warn('⚠️ Failed to save user session:', error);
+  }
+};
+
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -96,6 +111,7 @@ const App: React.FC = () => {
   const [surveys, setSurveys] = useState<Survey[]>([]);
   const [polls, setPolls] = useState<Poll[]>([]);
   const [forms, setForms] = useState<FeedbackForm[]>([]);
+  const [connections, setConnections] = useState<Connection[]>([]);
   
   // Set initial view to 'feed' (Social) on mobile, 'profile' on desktop
   const [view, setView] = useState<ViewType>(isMobileDevice() ? 'feed' : 'profile');
@@ -170,59 +186,47 @@ const App: React.FC = () => {
             setCurrentProjectId('p_default');
           }
         }
-      } catch (error) {
-        console.error('Failed to load initial data from Supabase:', error);
-        alert('Failed to connect to database. Please check your internet connection.');
+      } catch (error: any) {
+        console.warn('Failed to load initial data from Supabase:', error?.message || error);
+        // Don't show alert - allow app to continue with default project
       }
     };
 
     loadInitialData();
   }, []);
 
-  // Load current user from localStorage on mount (for persistent login)
+  // Load current user from Supabase on mount (for persistent login)
   useEffect(() => {
-    const savedCurrentUser = localStorage.getItem('srj_current_user');
-    if (savedCurrentUser) {
-      try {
-        const user = JSON.parse(savedCurrentUser);
-        console.log('🔄 Found saved user, auto-logging in...');
-        // Immediately set user for instant login (better UX on mobile)
-        setCurrentUser(user);
-        if (user.projectId) setCurrentProjectId(user.projectId);
-        // Set view to 'feed' (Social) on mobile, keep current view on desktop
-        if (isMobileDevice() && view === 'profile') {
-          setView('feed');
-        }
-        console.log('✅ Auto-login successful');
-        
-        // Verify user still exists in database in the background
-        userService.getById(user.id).then(dbUser => {
-          if (dbUser) {
-            // Update with fresh data from database
-            setCurrentUser(dbUser);
-            // Update localStorage with fresh data
-            localStorage.setItem('srj_current_user', JSON.stringify(dbUser));
-            console.log('✅ User verified and updated from database');
-          } else {
-            // User no longer exists, clear saved data
-            console.warn('⚠️ User no longer exists in database, clearing saved session');
-            setCurrentUser(null);
-            localStorage.removeItem('srj_current_user');
-            localStorage.removeItem('srj_saved_credentials');
+    const savedUserId = localStorage.getItem('srj_user_id') || sessionStorage.getItem('srj_user_id');
+    if (savedUserId) {
+      console.log('🔄 Found saved user ID, loading from Supabase...');
+      // Always fetch fresh user data from Supabase
+      userService.getById(savedUserId).then(dbUser => {
+        if (dbUser) {
+          setCurrentUser(dbUser);
+          if (dbUser.projectId) setCurrentProjectId(dbUser.projectId);
+          // Set view to 'feed' (Social) on mobile, keep current view on desktop
+          if (isMobileDevice() && view === 'profile') {
+            setView('feed');
           }
-        }).catch((error) => {
-          // If database check fails (e.g., no internet), keep user logged in
-          // This is better for mobile - user can still use app offline
-          console.warn('⚠️ Could not verify user from database, keeping saved session (offline mode):', error);
-          // Don't clear the user - let them use the app with saved data
-        });
-      } catch (error) {
-        console.error('❌ Failed to parse saved user:', error);
-        localStorage.removeItem('srj_current_user');
-        localStorage.removeItem('srj_saved_credentials');
-      }
+          console.log('✅ User loaded from Supabase');
+        } else {
+          // User no longer exists, clear saved data
+          console.warn('⚠️ User no longer exists in database, clearing saved session');
+          setCurrentUser(null);
+          localStorage.removeItem('srj_user_id');
+          sessionStorage.removeItem('srj_user_id');
+          localStorage.removeItem('srj_saved_credentials');
+        }
+      }).catch((error) => {
+        // If database check fails, clear session
+        console.warn('⚠️ Could not load user from database:', error);
+        setCurrentUser(null);
+        localStorage.removeItem('srj_user_id');
+        sessionStorage.removeItem('srj_user_id');
+      });
     } else {
-      console.log('ℹ️ No saved user found, showing login screen');
+      console.log('ℹ️ No saved user ID found, showing login screen');
     }
   }, []);
 
@@ -233,9 +237,19 @@ const App: React.FC = () => {
     let subscriptions: any[] = [];
 
     const loadProjectData = async () => {
-      try {
-        // Load tasks
-        const projectTasks = await taskService.getByProject(currentProjectId);
+      // Load each section independently so missing tables don't break the entire app
+      const loadData = async (loadFn: () => Promise<any>, sectionName: string) => {
+        try {
+          return await loadFn();
+        } catch (error: any) {
+          console.warn(`Failed to load ${sectionName}:`, error?.message || error);
+          return null;
+        }
+      };
+
+      // Load tasks
+      const projectTasks = await loadData(() => taskService.getByProject(currentProjectId), 'tasks');
+      if (projectTasks) {
         setTasks(projectTasks.map((t: any) => ({
           ...t,
           projectId: t.project_id || t.projectId,
@@ -245,17 +259,21 @@ const App: React.FC = () => {
           subTasks: t.sub_tasks || t.subTasks,
           createdAt: t.created_at || t.createdAt
         })));
+      }
 
-        // Load notes
-        const projectNotes = await noteService.getByProject(currentProjectId);
+      // Load notes
+      const projectNotes = await loadData(() => noteService.getByProject(currentProjectId), 'notes');
+      if (projectNotes) {
         setNotes(projectNotes.map((n: any) => ({
           ...n,
           projectId: n.project_id || n.projectId,
           createdAt: n.created_at || n.createdAt
         })));
+      }
 
-        // Load posts
-        const projectPosts = await postService.getByProject(currentProjectId);
+      // Load posts
+      const projectPosts = await loadData(() => postService.getByProject(currentProjectId), 'posts');
+      if (projectPosts) {
         setPosts(projectPosts.map((p: any) => ({
           ...p,
           projectId: p.project_id || p.projectId,
@@ -264,9 +282,11 @@ const App: React.FC = () => {
           userUsername: p.user_username || p.userUsername,
           createdAt: p.created_at || p.createdAt
         })));
+      }
 
-        // Load complaints
-        const projectComplaints = await complaintService.getByProject(currentProjectId);
+      // Load complaints
+      const projectComplaints = await loadData(() => complaintService.getByProject(currentProjectId), 'complaints');
+      if (projectComplaints) {
         setComplaints(projectComplaints.map((c: any) => ({
           ...c,
           projectId: c.project_id || c.projectId,
@@ -276,10 +296,12 @@ const App: React.FC = () => {
           targetUserId: c.target_user_id || c.targetUserId,
           createdAt: c.created_at || c.createdAt
         })));
+      }
 
-        // Load feedbacks (include private for admins)
-        const isAdmin = currentUser?.role === Role.ADMIN;
-        const projectFeedbacks = await feedbackService.getByProject(currentProjectId, isAdmin);
+      // Load feedbacks (include private for admins)
+      const isAdmin = currentUser?.role === Role.ADMIN;
+      const projectFeedbacks = await loadData(() => feedbackService.getByProject(currentProjectId, isAdmin), 'feedbacks');
+      if (projectFeedbacks) {
         setFeedbacks(projectFeedbacks.map((f: any) => ({
           ...f,
           projectId: f.project_id || f.projectId,
@@ -290,10 +312,12 @@ const App: React.FC = () => {
           isPrivate: f.is_private || f.isPrivate || false,
           createdAt: f.created_at || f.createdAt
         })));
+      }
 
-        // Load surveys (include closed for management)
-        const isManagementUser = isAdmin || currentUser?.role === Role.MANAGEMENT || currentUser?.role === Role.HOD;
-        const projectSurveys = await surveyService.getByProject(currentProjectId, isManagementUser);
+      // Load surveys (include closed for management)
+      const isManagementUser = isAdmin || currentUser?.role === Role.MANAGEMENT || currentUser?.role === Role.HOD;
+      const projectSurveys = await loadData(() => surveyService.getByProject(currentProjectId, isManagementUser), 'surveys');
+      if (projectSurveys) {
         setSurveys(projectSurveys.map((s: any) => ({
           ...s,
           projectId: s.project_id || s.projectId,
@@ -306,9 +330,11 @@ const App: React.FC = () => {
           deadline: s.deadline,
           createdAt: s.created_at || s.createdAt
         })));
+      }
 
-        // Load polls (include closed for management)
-        const projectPolls = await pollService.getByProject(currentProjectId, isManagementUser);
+      // Load polls (include closed for management)
+      const projectPolls = await loadData(() => pollService.getByProject(currentProjectId, isManagementUser), 'polls');
+      if (projectPolls) {
         setPolls(projectPolls.map((p: any) => ({
           ...p,
           projectId: p.project_id || p.projectId,
@@ -320,9 +346,11 @@ const App: React.FC = () => {
           deadline: p.deadline,
           createdAt: p.created_at || p.createdAt
         })));
+      }
 
-        // Load feedback forms (include closed for management)
-        const projectForms = await feedbackFormService.getByProject(currentProjectId, isManagementUser);
+      // Load feedback forms (include closed for management)
+      const projectForms = await loadData(() => feedbackFormService.getByProject(currentProjectId, isManagementUser), 'feedback forms');
+      if (projectForms) {
         setForms(projectForms.map((f: any) => ({
           ...f,
           projectId: f.project_id || f.projectId,
@@ -333,9 +361,11 @@ const App: React.FC = () => {
           deadline: f.deadline,
           createdAt: f.created_at || f.createdAt
         })));
+      }
 
-        // Load messages
-        const projectMessages = await messageService.getByProject(currentProjectId);
+      // Load messages
+      const projectMessages = await loadData(() => messageService.getByProject(currentProjectId), 'messages');
+      if (projectMessages) {
         setMessages(projectMessages.map((m: any) => ({
           ...m,
           projectId: m.project_id || m.projectId,
@@ -346,9 +376,11 @@ const App: React.FC = () => {
           callInfo: m.call_info || m.callInfo,
           createdAt: m.created_at || m.createdAt
         })));
+      }
 
-        // Load groups
-        const projectGroups = await groupService.getByProject(currentProjectId);
+      // Load groups
+      const projectGroups = await loadData(() => groupService.getByProject(currentProjectId), 'groups');
+      if (projectGroups) {
         setGroups(projectGroups.map((g: any) => ({
           ...g,
           projectId: g.project_id || g.projectId,
@@ -356,9 +388,11 @@ const App: React.FC = () => {
           activeCall: g.active_call || g.activeCall,
           createdAt: g.created_at || g.createdAt
         })));
+      }
 
-        // Load emails
-        const projectEmails = await emailService.getByProject(currentProjectId);
+      // Load emails
+      const projectEmails = await loadData(() => emailService.getByProject(currentProjectId), 'emails');
+      if (projectEmails) {
         setEmails(projectEmails.map((e: any) => ({
           ...e,
           projectId: e.project_id || e.projectId,
@@ -367,15 +401,19 @@ const App: React.FC = () => {
           receiverEmail: e.receiver_email || e.receiverEmail,
           createdAt: e.created_at || e.createdAt
         })));
+      }
 
-        // Load calendar events
-        const projectCalendarEvents = await calendarService.getByProject(currentProjectId);
+      // Load calendar events
+      const projectCalendarEvents = await loadData(() => calendarService.getByProject(currentProjectId), 'calendar events');
+      if (projectCalendarEvents) {
         console.log('Loaded calendar events:', projectCalendarEvents);
         setCalendarEvents(projectCalendarEvents);
+      }
 
-        // Load notifications for current user
-        if (currentUser) {
-          const userNotifications = await notificationService.getByUser(currentUser.id, currentProjectId);
+      // Load notifications for current user
+      if (currentUser) {
+        const userNotifications = await loadData(() => notificationService.getByUser(currentUser.id, currentProjectId), 'notifications');
+        if (userNotifications) {
           setNotifications(userNotifications.map((n: any) => ({
             ...n,
             projectId: n.project_id || n.projectId,
@@ -384,8 +422,17 @@ const App: React.FC = () => {
             createdAt: n.created_at || n.createdAt
           })));
         }
-      } catch (error) {
-        console.error('Failed to load project data:', error);
+
+        // Load connections for current user
+        const userConnections = await loadData(() => connectionService.getByUser(currentUser.id), 'connections');
+        if (userConnections) {
+          setConnections(userConnections.map((c: any) => ({
+            ...c,
+            userId: c.user_id || c.userId,
+            connectedUserId: c.connected_user_id || c.connectedUserId,
+            createdAt: c.created_at || c.createdAt
+          })));
+        }
       }
     };
 
@@ -901,7 +948,39 @@ const App: React.FC = () => {
         )
         .subscribe();
 
+      // Connections subscription
+      const connectionsSub = currentUser ? supabase
+        .channel('connections_changes')
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'connections' },
+          async (payload) => {
+            const connection = payload.new as any || payload.old as any;
+            if (connection && (connection.user_id === currentUser.id || connection.connected_user_id === currentUser.id)) {
+              if (payload.eventType === 'INSERT') {
+                const newConnection = payload.new as any;
+                setConnections(prev => [...prev, {
+                  id: newConnection.id,
+                  userId: newConnection.user_id || newConnection.userId,
+                  connectedUserId: newConnection.connected_user_id || newConnection.connectedUserId,
+                  status: newConnection.status || 'pending',
+                  createdAt: newConnection.created_at || newConnection.createdAt
+                }]);
+              } else if (payload.eventType === 'UPDATE') {
+                const updatedConnection = payload.new as any;
+                setConnections(prev => prev.map(c => c.id === updatedConnection.id ? {
+                  ...c,
+                  status: updatedConnection.status || c.status
+                } : c));
+              } else if (payload.eventType === 'DELETE') {
+                setConnections(prev => prev.filter(c => c.id !== (payload.old as any).id));
+              }
+            }
+          }
+        )
+        .subscribe() : null;
+
       subscriptions.push(tasksSub, postsSub, messagesSub, notesSub, complaintsSub, emailsSub, groupsSub, calendarSub, feedbackSub, surveySub, pollSub, formsSub);
+      if (connectionsSub) subscriptions.push(connectionsSub);
     };
 
     setupRealtimeSubscriptions();
@@ -983,21 +1062,8 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [calendarEvents, currentUser, currentProjectId]);
 
-  // Keep localStorage/sessionStorage sync for current user
-  useEffect(() => {
-    if (currentUser) {
-      // Check if user wants to be remembered (has entry in localStorage)
-      const savedUser = localStorage.getItem('srj_current_user');
-      if (savedUser) {
-        localStorage.setItem('srj_current_user', JSON.stringify(currentUser));
-      } else {
-        sessionStorage.setItem('srj_current_user', JSON.stringify(currentUser));
-      }
-    } else {
-      sessionStorage.removeItem('srj_current_user');
-      // Don't clear localStorage on logout - let user decide via "Remember Me"
-    }
-  }, [currentUser]);
+  // User data is stored in Supabase, we only keep user ID in storage
+  // No need to sync full user object - it will be loaded from Supabase when needed
 
   // Scoped Data Hooks
   const scopedUsers = useMemo(() => users.filter(u => u.projectId === currentProjectId || u.role === Role.ADMIN), [users, currentProjectId]);
@@ -1179,16 +1245,14 @@ const App: React.FC = () => {
     setCurrentUser(user);
     if (user.projectId) setCurrentProjectId(user.projectId);
     
-    // Save to localStorage if "Remember Me" is checked, otherwise use sessionStorage
+    // Only save user ID for "Remember Me" - full user data is in Supabase
+    saveUserSession(user.id, rememberMe);
     if (rememberMe) {
-      localStorage.setItem('srj_current_user', JSON.stringify(user));
-      console.log('✅ User saved to localStorage (Remember Me enabled)');
+      console.log('✅ User ID saved to localStorage (Remember Me enabled)');
     } else {
-      sessionStorage.setItem('srj_current_user', JSON.stringify(user));
-      // Clear localStorage if not remembering
-      localStorage.removeItem('srj_current_user');
+      console.log('✅ User ID saved to sessionStorage only (Remember Me disabled)');
+      localStorage.removeItem('srj_user_id');
       localStorage.removeItem('srj_saved_credentials');
-      console.log('✅ User saved to sessionStorage only (Remember Me disabled)');
     }
     
     setNeedsTwoStep(false);
@@ -1199,9 +1263,9 @@ const App: React.FC = () => {
 
   const handleLogout = () => {
     setCurrentUser(null);
-    sessionStorage.removeItem('srj_current_user');
-    // Clear localStorage only if user explicitly logs out (they want to disable "Remember Me")
-    localStorage.removeItem('srj_current_user');
+    sessionStorage.removeItem('srj_user_id');
+    // Clear localStorage on logout
+    localStorage.removeItem('srj_user_id');
     localStorage.removeItem('srj_saved_credentials');
     setNeedsTwoStep(false);
     setPendingUser(null);
@@ -1212,11 +1276,11 @@ const App: React.FC = () => {
     if (!currentUser) return;
     try {
       const updatedUser = await userService.update(currentUser.id, updates);
-    setCurrentUser(updatedUser);
-    setUsers(prev => prev.map(u => u.id === currentUser.id ? updatedUser : u));
+      setCurrentUser(updatedUser);
+      setUsers(prev => prev.map(u => u.id === currentUser.id ? updatedUser : u));
     } catch (error) {
       console.error('Failed to update profile:', error);
-      alert('Failed to update profile. Please try again.');
+      throw error; // Re-throw so AuthView can handle it properly
     }
   };
 
@@ -2022,6 +2086,67 @@ const App: React.FC = () => {
     }
   };
 
+  const handleConnect = async (connectedUserId: string) => {
+    if (!currentUser) return;
+    try {
+      await connectionService.create({
+        userId: currentUser.id,
+        connectedUserId,
+        status: 'pending'
+      });
+      
+      // Notify the user being connected to
+      const connectedUser = users.find(u => u.id === connectedUserId);
+      if (connectedUser) {
+        await addNotification(
+          connectedUserId,
+          'Connection Request',
+          `${currentUser.name} wants to connect with you`,
+          'connection',
+          'profile'
+        );
+      }
+    } catch (error: any) {
+      console.error('Failed to send connection request:', error);
+      if (error?.message?.includes('unique') || error?.code === '23505') {
+        alert('Connection request already exists.');
+      } else {
+        alert('Failed to send connection request. Please try again.');
+      }
+    }
+  };
+
+  const handleAcceptConnection = async (connectionId: string) => {
+    try {
+      await connectionService.update(connectionId, { status: 'accepted' });
+      
+      // Notify the user who sent the request
+      const connection = connections.find(c => c.id === connectionId);
+      if (connection && currentUser) {
+        const requesterId = connection.userId === currentUser.id ? connection.connectedUserId : connection.userId;
+        await addNotification(
+          requesterId,
+          'Connection Accepted',
+          `${currentUser.name} accepted your connection request`,
+          'connection',
+          'profile'
+        );
+      }
+    } catch (error) {
+      console.error('Failed to accept connection:', error);
+      alert('Failed to accept connection. Please try again.');
+    }
+  };
+
+  const handleDisconnect = async (connectionId: string) => {
+    try {
+      await connectionService.delete(connectionId);
+    } catch (error) {
+      console.error('Failed to disconnect:', error);
+      alert('Failed to disconnect. Please try again.');
+    }
+  };
+
   const handleSendMessage = async (receiverId: string | undefined, groupId: string | undefined, text: string, attachment?: MessageAttachment, replyToId?: string) => {
     if (!currentUser || !currentProjectId) return;
     try {
@@ -2507,6 +2632,7 @@ const App: React.FC = () => {
             onRegister={handleRegister}
             needsTwoStep={needsTwoStep}
             projectDomain={projectDomain}
+            activeProjectName={activeProject?.name}
           />
         </div>
       );
@@ -2534,7 +2660,13 @@ const App: React.FC = () => {
           userPosts={scopedPosts.filter(p => p.userId === currentUser?.id)}
           onDeletePost={handleDeletePost}
           projectDomain={projectDomain}
-        />;
+          activeProjectName={activeProject?.name}
+            allUsers={scopedUsers}
+            connections={connections}
+            onConnect={handleConnect}
+            onAcceptConnection={handleAcceptConnection}
+            onDisconnect={handleDisconnect}
+          />;
       case 'calendar':
         return currentUser ? <CalendarView
           currentUser={currentUser}
@@ -2674,18 +2806,15 @@ const App: React.FC = () => {
       {/* Header */}
       <header className="p-6 pb-2">
         <div className="flex items-center justify-between mb-4">
-          <div className="relative">
+          <div className="relative flex-1 flex justify-center">
             <button 
               onClick={() => currentUser?.role === Role.ADMIN && setShowProjectSelector(!showProjectSelector)}
-              className="flex items-center gap-2 text-left group"
+              className="flex items-center gap-2 text-center group"
             >
               <div>
-                <h1 className="text-xl font-black text-slate-900 flex items-center gap-2 tracking-tighter italic">
-                  SRJ <span className="bg-orange-600 text-[8px] text-white px-2 py-0.5 rounded-full uppercase not-italic tracking-normal">Enterprise</span>
+                <h1 className="text-xl font-black text-slate-900 text-center tracking-tighter" style={{ fontFamily: "'Leckerli One', cursive" }}>
+                  SRJ SOCIAL
                 </h1>
-                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest flex items-center gap-1">
-                   {activeProject?.name || 'Loading Node...'} {currentUser?.role === Role.ADMIN && <ChevronDown size={10} className="text-orange-500" />}
-                </p>
               </div>
             </button>
             

@@ -45,3 +45,4 @@ SELECT
   COUNT(*) FILTER (WHERE jsonb_array_length(assigned_to_array) = 0) as tasks_without_assignees
 FROM tasks;
 
+

@@ -38,6 +38,8 @@ export interface User {
   dob?: string;
   contactNo?: string;
   profilePhoto?: string; // Base64
+  bio?: string; // User bio/description
+  backgroundImage?: string; // Background/banner image (Base64)
   // Security
   password?: string;
   isTwoStepEnabled?: boolean;
@@ -174,7 +176,7 @@ export interface Notification {
   userId: string;
   title: string;
   message: string;
-  type: 'task' | 'complaint' | 'update' | 'call' | 'message' | 'post' | 'group' | 'note' | 'email' | 'like' | 'comment' | 'calendar';
+  type: 'task' | 'complaint' | 'update' | 'call' | 'message' | 'post' | 'group' | 'note' | 'email' | 'like' | 'comment' | 'calendar' | 'connection';
   read: boolean;
   createdAt: string;
   linkTo?: ViewType;
@@ -278,6 +280,14 @@ export interface FeedbackFormResponse {
   userEmail?: string;
   responses: { [fieldId: string]: string | string[] | number }; // Field ID to response value mapping
   submittedAt: string;
+}
+
+export interface Connection {
+  id: string;
+  userId: string; // User who initiated the connection
+  connectedUserId: string; // User being connected to
+  status: 'pending' | 'accepted' | 'blocked'; // Connection status
+  createdAt: string;
 }
 
 export interface Feedback {
