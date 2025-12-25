@@ -244,34 +244,64 @@ export const taskService = {
       .eq('project_id', projectId)
       .order('created_at', { ascending: false });
     if (error) throw error;
-    return data || [];
+    
+    // Map database format to TypeScript format, handling both old (single) and new (array) formats
+    return (data || []).map((item: any) => ({
+      ...item,
+      projectId: item.project_id || item.projectId,
+      dueDate: item.due_date || item.dueDate,
+      createdAt: item.created_at || item.createdAt,
+      subTasks: item.sub_tasks || item.subTasks || [],
+      assignedBy: item.assigned_by || item.assignedBy,
+      assignedTo: item.assigned_to_array ? item.assigned_to_array : (item.assigned_to ? [item.assigned_to] : [])
+    }));
   },
 
   async create(task: Omit<Task, 'id' | 'createdAt'>): Promise<Task> {
+    const insertData: any = {
+      project_id: task.projectId,
+      title: task.title,
+      description: task.description,
+      priority: task.priority,
+      completed: task.completed,
+      category: task.category,
+      assigned_by: task.assignedBy,
+      assigned_to_array: task.assignedTo || [],
+      due_date: task.dueDate,
+      sub_tasks: task.subTasks,
+      created_at: new Date().toISOString()
+    };
+    
     const { data, error } = await supabase
       .from('tasks')
-      .insert({
-        ...task,
-        project_id: task.projectId,
-        assigned_by: task.assignedBy,
-        assigned_to: task.assignedTo,
-        due_date: task.dueDate,
-        sub_tasks: task.subTasks,
-        created_at: new Date().toISOString()
-      })
+      .insert(insertData)
       .select()
       .single();
     if (error) throw error;
-    return data;
+    
+    return {
+      ...data,
+      projectId: data.project_id || data.projectId,
+      dueDate: data.due_date || data.dueDate,
+      createdAt: data.created_at || data.createdAt,
+      subTasks: data.sub_tasks || data.subTasks || [],
+      assignedBy: data.assigned_by || data.assignedBy,
+      assignedTo: data.assigned_to_array || (data.assigned_to ? [data.assigned_to] : [])
+    };
   },
 
   async update(id: string, updates: Partial<Task>): Promise<Task> {
-    const updateData: any = { ...updates };
-    if (updates.projectId) updateData.project_id = updates.projectId;
-    if (updates.assignedBy) updateData.assigned_by = updates.assignedBy;
-    if (updates.assignedTo) updateData.assigned_to = updates.assignedTo;
-    if (updates.dueDate) updateData.due_date = updates.dueDate;
-    if (updates.subTasks) updateData.sub_tasks = updates.subTasks;
+    const updateData: any = {};
+    if (updates.title !== undefined) updateData.title = updates.title;
+    if (updates.description !== undefined) updateData.description = updates.description;
+    if (updates.priority !== undefined) updateData.priority = updates.priority;
+    if (updates.completed !== undefined) updateData.completed = updates.completed;
+    if (updates.category !== undefined) updateData.category = updates.category;
+    if (updates.projectId !== undefined) updateData.project_id = updates.projectId;
+    if (updates.assignedBy !== undefined) updateData.assigned_by = updates.assignedBy;
+    if (updates.assignedTo !== undefined) updateData.assigned_to_array = updates.assignedTo;
+    if (updates.dueDate !== undefined) updateData.due_date = updates.dueDate;
+    if (updates.subTasks !== undefined) updateData.sub_tasks = updates.subTasks;
     
     const { data, error } = await supabase
       .from('tasks')
@@ -280,7 +310,16 @@ export const taskService = {
       .select()
       .single();
     if (error) throw error;
-    return data;
+    
+    return {
+      ...data,
+      projectId: data.project_id || data.projectId,
+      dueDate: data.due_date || data.dueDate,
+      createdAt: data.created_at || data.createdAt,
+      subTasks: data.sub_tasks || data.subTasks || [],
+      assignedBy: data.assigned_by || data.assignedBy,
+      assignedTo: data.assigned_to_array || (data.assigned_to ? [data.assigned_to] : [])
+    };
   },
 
   async delete(id: string): Promise<void> {

@@ -84,20 +84,34 @@ export const TaskCard: React.FC<TaskCardProps> = ({ task, onToggle, onClick, use
             {task.description || "No technical description."}
           </p>
 
-          {(task.assignedBy || task.assignedTo) && (
+          {(task.assignedBy || (task.assignedTo && task.assignedTo.length > 0)) && (
             <div className="flex items-center gap-2 mb-2 p-1.5 bg-slate-50 rounded-lg border border-slate-100">
-              <User size={10} className="text-slate-400" />
-              <span className="text-[9px] text-slate-500 font-bold uppercase flex gap-1">
-                {task.assignedBy && (
-                  <span>From: <span className="text-orange-600">{users[task.assignedBy] || 'Admin'}</span></span>
-                )}
-                {task.assignedTo && (
-                  <>
-                    <span className="text-slate-300 mx-1">|</span>
-                    <span>To: <span className="text-slate-900">{users[task.assignedTo] || 'User'}</span></span>
-                  </>
-                )}
-              </span>
+              <User size={10} className="text-slate-400 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <span className="text-[9px] text-slate-500 font-bold uppercase flex flex-wrap gap-1 items-center">
+                  {task.assignedBy && (
+                    <span>From: <span className="text-orange-600">{users[task.assignedBy] || 'Admin'}</span></span>
+                  )}
+                  {task.assignedTo && task.assignedTo.length > 0 && (
+                    <>
+                      {task.assignedBy && <span className="text-slate-300 mx-1">|</span>}
+                      <span className="text-slate-700">
+                        To: <span className="text-slate-900">
+                          {task.assignedTo.length === 1 
+                            ? (users[task.assignedTo[0]] || 'User')
+                            : `${task.assignedTo.length} users`
+                          }
+                        </span>
+                        {task.assignedTo.length > 1 && (
+                          <span className="text-[8px] text-slate-400 ml-1">
+                            ({task.assignedTo.map(id => users[id] || 'User').slice(0, 2).join(', ')}{task.assignedTo.length > 2 ? '...' : ''})
+                          </span>
+                        )}
+                      </span>
+                    </>
+                  )}
+                </span>
+              </div>
             </div>
           )}
           

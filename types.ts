@@ -81,7 +81,7 @@ export interface Task {
   createdAt: string;
   subTasks: SubTask[];
   assignedBy?: string;
-  assignedTo?: string;
+  assignedTo?: string[]; // Changed to array to support multiple assignees
 }
 
 export interface Note {

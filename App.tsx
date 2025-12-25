@@ -240,7 +240,7 @@ const App: React.FC = () => {
           ...t,
           projectId: t.project_id || t.projectId,
           assignedBy: t.assigned_by || t.assignedBy,
-          assignedTo: t.assigned_to || t.assignedTo,
+          assignedTo: t.assigned_to_array ? t.assigned_to_array : (t.assigned_to ? [t.assigned_to] : []),
           dueDate: t.due_date || t.dueDate,
           subTasks: t.sub_tasks || t.subTasks,
           createdAt: t.created_at || t.createdAt
@@ -405,7 +405,7 @@ const App: React.FC = () => {
                 ...newTask,
                 projectId: newTask.project_id || newTask.projectId,
                 assignedBy: newTask.assigned_by || newTask.assignedBy,
-                assignedTo: newTask.assigned_to || newTask.assignedTo,
+                assignedTo: newTask.assigned_to_array ? newTask.assigned_to_array : (newTask.assigned_to ? [newTask.assigned_to] : []),
                 dueDate: newTask.due_date || newTask.dueDate,
                 subTasks: newTask.sub_tasks || newTask.subTasks,
                 createdAt: newTask.created_at || newTask.createdAt
@@ -416,7 +416,7 @@ const App: React.FC = () => {
                 ...updatedTask,
                 projectId: updatedTask.project_id || updatedTask.projectId,
                 assignedBy: updatedTask.assigned_by || updatedTask.assignedBy,
-                assignedTo: updatedTask.assigned_to || updatedTask.assignedTo,
+                assignedTo: updatedTask.assigned_to_array ? updatedTask.assigned_to_array : (updatedTask.assigned_to ? [updatedTask.assigned_to] : []),
                 dueDate: updatedTask.due_date || updatedTask.dueDate,
                 subTasks: updatedTask.sub_tasks || updatedTask.subTasks,
                 createdAt: updatedTask.created_at || updatedTask.createdAt
@@ -1504,29 +1504,35 @@ const App: React.FC = () => {
   const addTask = async (data: any) => {
     if (!currentUser || !currentProjectId) return;
     try {
+      // Convert single assignee to array format, or use provided array
+      const assignedUsers = data.assignedTo 
+        ? (Array.isArray(data.assignedTo) ? data.assignedTo : [data.assignedTo])
+        : [currentUser.id];
+      
       await taskService.create({
-      projectId: currentProjectId,
-      title: data.title,
-      description: data.description,
-      priority: data.priority,
-      category: data.category,
-      dueDate: data.dueDate,
-      completed: false,
-      subTasks: [],
-      assignedBy: currentUser.id,
-      assignedTo: data.assignedTo || currentUser.id
+        projectId: currentProjectId,
+        title: data.title,
+        description: data.description,
+        priority: data.priority,
+        category: data.category,
+        dueDate: data.dueDate,
+        completed: false,
+        subTasks: [],
+        assignedBy: currentUser.id,
+        assignedTo: assignedUsers
       });
       
-      // Notify the assigned user about the new task
-      const assignedUserId = data.assignedTo || currentUser.id;
-      if (assignedUserId !== currentUser.id) {
-        await addNotification(
-          assignedUserId,
-          'New Task Assigned',
-          `You have been assigned a new task: ${data.title}`,
-          'task',
-          'tasks'
-        );
+      // Notify all assigned users about the new task (except the assigner if they assigned to themselves)
+      for (const assignedUserId of assignedUsers) {
+        if (assignedUserId !== currentUser.id) {
+          await addNotification(
+            assignedUserId,
+            'New Task Assigned',
+            `You have been assigned a new task: ${data.title}`,
+            'task',
+            'tasks'
+          );
+        }
       }
       
       // Real-time subscription will update the state automatically
@@ -2456,7 +2462,9 @@ const App: React.FC = () => {
 
   const filteredTasks = useMemo(() => {
     if (!currentUser) return [];
-    let result = scopedTasks.filter(t => t.assignedTo === currentUser.id || t.assignedBy === currentUser.id);
+    let result = scopedTasks.filter(t => 
+      (t.assignedTo && t.assignedTo.includes(currentUser.id)) || t.assignedBy === currentUser.id
+    );
     
     if (searchQuery && (view === 'tasks' || view === 'upcoming')) {
       result = result.filter(t => t.title.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -2743,7 +2751,17 @@ const App: React.FC = () => {
         <button onClick={() => setView('profile')} className={`p-2 transition-all flex flex-col items-center gap-1 ${view === 'profile' ? 'text-orange-600 scale-110' : 'text-slate-400'}`}><UserIcon size={20} /><span className="text-[8px] font-bold uppercase tracking-widest">ID</span></button>
       </nav>
 
-      {isModalOpen && <AddTaskModal onClose={() => setIsModalOpen(false)} onSaveTask={addTask} onSaveNote={addNote} subordinates={scopedUsers.filter(u => u.parentId === currentUser?.id)} />}
+      {isModalOpen && <AddTaskModal 
+        onClose={() => setIsModalOpen(false)} 
+        onSaveTask={addTask} 
+        onSaveNote={addNote}
+        currentUser={currentUser}
+        subordinates={
+          currentUser?.role === Role.ADMIN || currentUser?.role === Role.MANAGEMENT || currentUser?.role === Role.HOD
+            ? scopedUsers.filter(u => u.id !== currentUser.id) // Management can assign to all users (except themselves)
+            : scopedUsers.filter(u => u.parentId === currentUser?.id) // Regular users can only assign to their subordinates
+        } 
+      />}
       {isPostModalOpen && <AddPostModal onClose={() => setIsPostModalOpen(false)} onSave={handleCreatePost} />}
     </div>
   );
