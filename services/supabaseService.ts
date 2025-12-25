@@ -11,7 +11,12 @@ import {
   Message, 
   Group, 
   Email,
-  CalendarEvent 
+  CalendarEvent,
+  Feedback,
+  Survey,
+  Poll,
+  FeedbackForm,
+  FeedbackFormResponse
 } from '../types';
 
 // Singleton pattern to prevent multiple client instances during HMR
@@ -919,6 +924,674 @@ export const calendarService = {
   async delete(id: string): Promise<void> {
     const { error } = await supabase
       .from('calendar_events')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+  }
+};
+
+// Feedback Operations
+export const feedbackService = {
+  async getByProject(projectId: string, includePrivate: boolean = false): Promise<Feedback[]> {
+    let query = supabase
+      .from('feedback')
+      .select('*')
+      .eq('project_id', projectId);
+    
+    // If not including private, filter them out
+    if (!includePrivate) {
+      query = query.eq('is_private', false);
+    }
+    
+    const { data, error } = await query.order('created_at', { ascending: false });
+    if (error) throw error;
+    
+    return (data || []).map(item => ({
+      id: item.id,
+      projectId: item.project_id || item.projectId,
+      surveyId: item.survey_id || item.surveyId,
+      userId: item.user_id || item.userId,
+      userName: item.user_name || item.userName,
+      userEmail: item.user_email || item.userEmail,
+      subject: item.subject,
+      message: item.message,
+      isPrivate: item.is_private || item.isPrivate || false,
+      createdAt: item.created_at || item.createdAt
+    }));
+  },
+
+  async create(feedback: Omit<Feedback, 'id' | 'createdAt'>): Promise<Feedback> {
+    // Generate a unique ID for the feedback
+    const feedbackId = 'f' + Date.now().toString() + Math.random().toString(36).substring(2, 11);
+    
+    const insertData: any = {
+      id: feedbackId,
+      project_id: feedback.projectId,
+      subject: feedback.subject,
+      message: feedback.message,
+      is_private: feedback.isPrivate || false,
+      created_at: new Date().toISOString()
+    };
+    
+    // Optional fields
+    if (feedback.surveyId) {
+      insertData.survey_id = feedback.surveyId;
+    }
+    if (feedback.userId) {
+      insertData.user_id = feedback.userId;
+    }
+    if (feedback.userName) {
+      insertData.user_name = feedback.userName;
+    }
+    if (feedback.userEmail) {
+      insertData.user_email = feedback.userEmail;
+    }
+    
+    const { data, error } = await supabase
+      .from('feedback')
+      .insert(insertData)
+      .select()
+      .single();
+    if (error) throw error;
+    
+    return {
+      id: data.id,
+      projectId: data.project_id || data.projectId,
+      surveyId: data.survey_id || data.surveyId,
+      userId: data.user_id || data.userId,
+      userName: data.user_name || data.userName,
+      userEmail: data.user_email || data.userEmail,
+      subject: data.subject,
+      message: data.message,
+      isPrivate: data.is_private || data.isPrivate || false,
+      createdAt: data.created_at || data.createdAt
+    };
+  },
+
+  async delete(id: string): Promise<void> {
+    const { error } = await supabase
+      .from('feedback')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+  }
+};
+
+// Survey Operations
+export const surveyService = {
+  async getByProject(projectId: string, includeClosed: boolean = false): Promise<Survey[]> {
+    let query = supabase
+      .from('surveys')
+      .select('*')
+      .eq('project_id', projectId);
+    
+    if (!includeClosed) {
+      query = query.eq('status', 'active');
+    }
+    
+    const { data, error } = await query.order('created_at', { ascending: false });
+    if (error) throw error;
+    
+    return (data || []).map(item => ({
+      id: item.id,
+      projectId: item.project_id || item.projectId,
+      createdBy: item.created_by || item.createdBy,
+      createdByName: item.created_by_name || item.createdByName,
+      title: item.title,
+      description: item.description,
+      programName: item.program_name || item.programName,
+      eventName: item.event_name || item.eventName,
+      type: item.type || 'general',
+      status: item.status || 'active',
+      deadline: item.deadline,
+      createdAt: item.created_at || item.createdAt
+    }));
+  },
+
+  async getById(id: string): Promise<Survey | null> {
+    const { data, error } = await supabase
+      .from('surveys')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (error) throw error;
+    
+    if (!data) return null;
+    
+    return {
+      id: data.id,
+      projectId: data.project_id || data.projectId,
+      createdBy: data.created_by || data.createdBy,
+      createdByName: data.created_by_name || data.createdByName,
+      title: data.title,
+      description: data.description,
+      programName: data.program_name || data.programName,
+      eventName: data.event_name || data.eventName,
+      type: data.type || 'general',
+      status: data.status || 'active',
+      deadline: data.deadline,
+      createdAt: data.created_at || data.createdAt
+    };
+  },
+
+  async create(survey: Omit<Survey, 'id' | 'createdAt'>): Promise<Survey> {
+    // Generate a unique ID for the survey
+    const surveyId = 's' + Date.now().toString() + Math.random().toString(36).substring(2, 11);
+    
+    const insertData: any = {
+      id: surveyId,
+      project_id: survey.projectId,
+      created_by: survey.createdBy,
+      created_by_name: survey.createdByName,
+      title: survey.title,
+      type: survey.type || 'general',
+      status: survey.status || 'active',
+      created_at: new Date().toISOString()
+    };
+    
+    if (survey.description) {
+      insertData.description = survey.description;
+    }
+    if (survey.programName) {
+      insertData.program_name = survey.programName;
+    }
+    if (survey.eventName) {
+      insertData.event_name = survey.eventName;
+    }
+    if (survey.deadline) {
+      insertData.deadline = survey.deadline;
+    }
+    
+    const { data, error } = await supabase
+      .from('surveys')
+      .insert(insertData)
+      .select()
+      .single();
+    if (error) throw error;
+    
+    return {
+      id: data.id,
+      projectId: data.project_id || data.projectId,
+      createdBy: data.created_by || data.createdBy,
+      createdByName: data.created_by_name || data.createdByName,
+      title: data.title,
+      description: data.description,
+      programName: data.program_name || data.programName,
+      eventName: data.event_name || data.eventName,
+      type: data.type || 'general',
+      status: data.status || 'active',
+      deadline: data.deadline,
+      createdAt: data.created_at || data.createdAt
+    };
+  },
+
+  async update(id: string, updates: Partial<Survey>): Promise<Survey> {
+    const updateData: any = {};
+    if (updates.status !== undefined) updateData.status = updates.status;
+    if (updates.title !== undefined) updateData.title = updates.title;
+    if (updates.description !== undefined) updateData.description = updates.description;
+    if (updates.programName !== undefined) updateData.program_name = updates.programName;
+    if (updates.eventName !== undefined) updateData.event_name = updates.eventName;
+    if (updates.type !== undefined) updateData.type = updates.type;
+    if (updates.deadline !== undefined) updateData.deadline = updates.deadline;
+    
+    const { data, error } = await supabase
+      .from('surveys')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    
+    return {
+      id: data.id,
+      projectId: data.project_id || data.projectId,
+      createdBy: data.created_by || data.createdBy,
+      createdByName: data.created_by_name || data.createdByName,
+      title: data.title,
+      description: data.description,
+      programName: data.program_name || data.programName,
+      eventName: data.event_name || data.eventName,
+      type: data.type || 'general',
+      status: data.status || 'active',
+      deadline: data.deadline,
+      createdAt: data.created_at || data.createdAt
+    };
+  },
+
+  async delete(id: string): Promise<void> {
+    const { error } = await supabase
+      .from('surveys')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+  }
+};
+
+// Poll Operations
+export const pollService = {
+  async getByProject(projectId: string, includeClosed: boolean = false): Promise<Poll[]> {
+    let query = supabase
+      .from('polls')
+      .select('*')
+      .eq('project_id', projectId);
+    
+    if (!includeClosed) {
+      query = query.eq('status', 'active');
+    }
+    
+    const { data, error } = await query.order('created_at', { ascending: false });
+    if (error) throw error;
+    
+    return (data || []).map(item => ({
+      id: item.id,
+      projectId: item.project_id || item.projectId,
+      createdBy: item.created_by || item.createdBy,
+      createdByName: item.created_by_name || item.createdByName,
+      question: item.question,
+      description: item.description,
+      options: item.options || [],
+      status: item.status || 'active',
+      allowMultipleVotes: item.allow_multiple_votes || item.allowMultipleVotes || false,
+      showResultsBeforeVoting: item.show_results_before_voting || item.showResultsBeforeVoting || false,
+      deadline: item.deadline,
+      createdAt: item.created_at || item.createdAt
+    }));
+  },
+
+  async getById(id: string): Promise<Poll | null> {
+    const { data, error } = await supabase
+      .from('polls')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (error) throw error;
+    
+    if (!data) return null;
+    
+    return {
+      id: data.id,
+      projectId: data.project_id || data.projectId,
+      createdBy: data.created_by || data.createdBy,
+      createdByName: data.created_by_name || data.createdByName,
+      question: data.question,
+      description: data.description,
+      options: data.options || [],
+      status: data.status || 'active',
+      allowMultipleVotes: data.allow_multiple_votes || data.allowMultipleVotes || false,
+      showResultsBeforeVoting: data.show_results_before_voting || data.showResultsBeforeVoting || false,
+      deadline: data.deadline,
+      createdAt: data.created_at || data.createdAt
+    };
+  },
+
+  async create(poll: Omit<Poll, 'id' | 'createdAt'>): Promise<Poll> {
+    // Generate a unique ID for the poll
+    const pollId = 'p' + Date.now().toString() + Math.random().toString(36).substring(2, 11);
+    
+    const insertData: any = {
+      id: pollId,
+      project_id: poll.projectId,
+      created_by: poll.createdBy,
+      created_by_name: poll.createdByName,
+      question: poll.question,
+      options: poll.options || [],
+      status: poll.status || 'active',
+      allow_multiple_votes: poll.allowMultipleVotes || false,
+      show_results_before_voting: poll.showResultsBeforeVoting || false,
+      created_at: new Date().toISOString()
+    };
+    
+    if (poll.description) {
+      insertData.description = poll.description;
+    }
+    if (poll.deadline) {
+      insertData.deadline = poll.deadline;
+    }
+    
+    const { data, error } = await supabase
+      .from('polls')
+      .insert(insertData)
+      .select()
+      .single();
+    if (error) throw error;
+    
+    return {
+      id: data.id,
+      projectId: data.project_id || data.projectId,
+      createdBy: data.created_by || data.createdBy,
+      createdByName: data.created_by_name || data.createdByName,
+      question: data.question,
+      description: data.description,
+      options: data.options || [],
+      status: data.status || 'active',
+      allowMultipleVotes: data.allow_multiple_votes || data.allowMultipleVotes || false,
+      showResultsBeforeVoting: data.show_results_before_voting || data.showResultsBeforeVoting || false,
+      deadline: data.deadline,
+      createdAt: data.created_at || data.createdAt
+    };
+  },
+
+  async vote(pollId: string, optionId: string, userId: string): Promise<Poll> {
+    // Get the poll first
+    const poll = await this.getById(pollId);
+    if (!poll) throw new Error('Poll not found');
+    
+    if (poll.status !== 'active') {
+      throw new Error('Poll is closed');
+    }
+    
+    // Check if deadline has passed
+    if (poll.deadline && new Date(poll.deadline) < new Date()) {
+      throw new Error('Poll deadline has passed');
+    }
+    
+    // Find the option
+    const optionIndex = poll.options.findIndex(opt => opt.id === optionId);
+    if (optionIndex === -1) {
+      throw new Error('Option not found');
+    }
+    
+    // Check if user already voted (if multiple votes not allowed)
+    if (!poll.allowMultipleVotes) {
+      const hasVoted = poll.options.some(opt => opt.voters.includes(userId));
+      if (hasVoted) {
+        throw new Error('You have already voted on this poll');
+      }
+    }
+    
+    // Update the option
+    const updatedOptions = [...poll.options];
+    if (!updatedOptions[optionIndex].voters.includes(userId)) {
+      updatedOptions[optionIndex].votes += 1;
+      updatedOptions[optionIndex].voters.push(userId);
+    }
+    
+    // Update the poll
+    const { data, error } = await supabase
+      .from('polls')
+      .update({ options: updatedOptions })
+      .eq('id', pollId)
+      .select()
+      .single();
+    if (error) throw error;
+    
+    return {
+      id: data.id,
+      projectId: data.project_id || data.projectId,
+      createdBy: data.created_by || data.createdBy,
+      createdByName: data.created_by_name || data.createdByName,
+      question: data.question,
+      description: data.description,
+      options: data.options || [],
+      status: data.status || 'active',
+      allowMultipleVotes: data.allow_multiple_votes || data.allowMultipleVotes || false,
+      showResultsBeforeVoting: data.show_results_before_voting || data.showResultsBeforeVoting || false,
+      deadline: data.deadline,
+      createdAt: data.created_at || data.createdAt
+    };
+  },
+
+  async update(id: string, updates: Partial<Poll>): Promise<Poll> {
+    const updateData: any = {};
+    if (updates.status !== undefined) updateData.status = updates.status;
+    if (updates.question !== undefined) updateData.question = updates.question;
+    if (updates.description !== undefined) updateData.description = updates.description;
+    if (updates.options !== undefined) updateData.options = updates.options;
+    if (updates.allowMultipleVotes !== undefined) updateData.allow_multiple_votes = updates.allowMultipleVotes;
+    if (updates.showResultsBeforeVoting !== undefined) updateData.show_results_before_voting = updates.showResultsBeforeVoting;
+    if (updates.deadline !== undefined) updateData.deadline = updates.deadline;
+    
+    const { data, error } = await supabase
+      .from('polls')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    
+    return {
+      id: data.id,
+      projectId: data.project_id || data.projectId,
+      createdBy: data.created_by || data.createdBy,
+      createdByName: data.created_by_name || data.createdByName,
+      question: data.question,
+      description: data.description,
+      options: data.options || [],
+      status: data.status || 'active',
+      allowMultipleVotes: data.allow_multiple_votes || data.allowMultipleVotes || false,
+      showResultsBeforeVoting: data.show_results_before_voting || data.showResultsBeforeVoting || false,
+      deadline: data.deadline,
+      createdAt: data.created_at || data.createdAt
+    };
+  },
+
+  async delete(id: string): Promise<void> {
+    const { error } = await supabase
+      .from('polls')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+  }
+};
+
+// Feedback Form Operations
+export const feedbackFormService = {
+  async getByProject(projectId: string, includeClosed: boolean = false): Promise<FeedbackForm[]> {
+    let query = supabase
+      .from('feedback_forms')
+      .select('*')
+      .eq('project_id', projectId);
+    
+    if (!includeClosed) {
+      query = query.eq('status', 'active');
+    }
+    
+    const { data, error } = await query.order('created_at', { ascending: false });
+    if (error) throw error;
+    
+    return (data || []).map(item => ({
+      id: item.id,
+      projectId: item.project_id || item.projectId,
+      createdBy: item.created_by || item.createdBy,
+      createdByName: item.created_by_name || item.createdByName,
+      title: item.title,
+      description: item.description,
+      fields: item.fields || [],
+      status: item.status || 'active',
+      allowMultipleSubmissions: item.allow_multiple_submissions || item.allowMultipleSubmissions || false,
+      deadline: item.deadline,
+      createdAt: item.created_at || item.createdAt
+    }));
+  },
+
+  async getById(id: string): Promise<FeedbackForm | null> {
+    const { data, error } = await supabase
+      .from('feedback_forms')
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (error) throw error;
+    
+    if (!data) return null;
+    
+    return {
+      id: data.id,
+      projectId: data.project_id || data.projectId,
+      createdBy: data.created_by || data.createdBy,
+      createdByName: data.created_by_name || data.createdByName,
+      title: data.title,
+      description: data.description,
+      fields: data.fields || [],
+      status: data.status || 'active',
+      allowMultipleSubmissions: data.allow_multiple_submissions || data.allowMultipleSubmissions || false,
+      deadline: data.deadline,
+      createdAt: data.created_at || data.createdAt
+    };
+  },
+
+  async create(form: Omit<FeedbackForm, 'id' | 'createdAt'>): Promise<FeedbackForm> {
+    const formId = 'ff' + Date.now().toString() + Math.random().toString(36).substring(2, 11);
+    
+    const insertData: any = {
+      id: formId,
+      project_id: form.projectId,
+      created_by: form.createdBy,
+      created_by_name: form.createdByName,
+      title: form.title,
+      fields: form.fields || [],
+      status: form.status || 'active',
+      allow_multiple_submissions: form.allowMultipleSubmissions || false,
+      created_at: new Date().toISOString()
+    };
+    
+    if (form.description) insertData.description = form.description;
+    if (form.deadline) insertData.deadline = form.deadline;
+    
+    const { data, error } = await supabase
+      .from('feedback_forms')
+      .insert(insertData)
+      .select()
+      .single();
+    if (error) throw error;
+    
+    return {
+      id: data.id,
+      projectId: data.project_id || data.projectId,
+      createdBy: data.created_by || data.createdBy,
+      createdByName: data.created_by_name || data.createdByName,
+      title: data.title,
+      description: data.description,
+      fields: data.fields || [],
+      status: data.status || 'active',
+      allowMultipleSubmissions: data.allow_multiple_submissions || data.allowMultipleSubmissions || false,
+      deadline: data.deadline,
+      createdAt: data.created_at || data.createdAt
+    };
+  },
+
+  async update(id: string, updates: Partial<FeedbackForm>): Promise<FeedbackForm> {
+    const updateData: any = {};
+    if (updates.status !== undefined) updateData.status = updates.status;
+    if (updates.title !== undefined) updateData.title = updates.title;
+    if (updates.description !== undefined) updateData.description = updates.description;
+    if (updates.fields !== undefined) updateData.fields = updates.fields;
+    if (updates.allowMultipleSubmissions !== undefined) updateData.allow_multiple_submissions = updates.allowMultipleSubmissions;
+    if (updates.deadline !== undefined) updateData.deadline = updates.deadline;
+    
+    const { data, error } = await supabase
+      .from('feedback_forms')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    
+    return {
+      id: data.id,
+      projectId: data.project_id || data.projectId,
+      createdBy: data.created_by || data.createdBy,
+      createdByName: data.created_by_name || data.createdByName,
+      title: data.title,
+      description: data.description,
+      fields: data.fields || [],
+      status: data.status || 'active',
+      allowMultipleSubmissions: data.allow_multiple_submissions || data.allowMultipleSubmissions || false,
+      deadline: data.deadline,
+      createdAt: data.created_at || data.createdAt
+    };
+  },
+
+  async delete(id: string): Promise<void> {
+    const { error } = await supabase
+      .from('feedback_forms')
+      .delete()
+      .eq('id', id);
+    if (error) throw error;
+  },
+
+  async getSubmissions(formId: string): Promise<FeedbackFormResponse[]> {
+    const { data, error } = await supabase
+      .from('feedback_form_submissions')
+      .select('*')
+      .eq('form_id', formId)
+      .order('submitted_at', { ascending: false });
+    if (error) throw error;
+    
+    return (data || []).map(item => ({
+      id: item.id,
+      formId: item.form_id || item.formId,
+      projectId: item.project_id || item.projectId,
+      userId: item.user_id || item.userId,
+      userName: item.user_name || item.userName,
+      userEmail: item.user_email || item.userEmail,
+      responses: item.responses || {},
+      submittedAt: item.submitted_at || item.submittedAt
+    }));
+  },
+
+  async submitResponse(response: Omit<FeedbackFormResponse, 'id' | 'submittedAt'>): Promise<FeedbackFormResponse> {
+    const responseId = 'fs' + Date.now().toString() + Math.random().toString(36).substring(2, 11);
+    
+    // Check if user already submitted (if multiple submissions not allowed)
+    const form = await this.getById(response.formId);
+    if (!form) throw new Error('Form not found');
+    
+    if (form.status !== 'active') {
+      throw new Error('Form is closed');
+    }
+    
+    if (form.deadline && new Date(form.deadline) < new Date()) {
+      throw new Error('Form deadline has passed');
+    }
+    
+    if (!form.allowMultipleSubmissions && response.userId) {
+      const existing = await supabase
+        .from('feedback_form_submissions')
+        .select('id')
+        .eq('form_id', response.formId)
+        .eq('user_id', response.userId)
+        .single();
+      
+      if (existing.data) {
+        throw new Error('You have already submitted this form');
+      }
+    }
+    
+    const insertData: any = {
+      id: responseId,
+      form_id: response.formId,
+      project_id: response.projectId,
+      responses: response.responses,
+      submitted_at: new Date().toISOString()
+    };
+    
+    if (response.userId) insertData.user_id = response.userId;
+    if (response.userName) insertData.user_name = response.userName;
+    if (response.userEmail) insertData.user_email = response.userEmail;
+    
+    const { data, error } = await supabase
+      .from('feedback_form_submissions')
+      .insert(insertData)
+      .select()
+      .single();
+    if (error) throw error;
+    
+    return {
+      id: data.id,
+      formId: data.form_id || data.formId,
+      projectId: data.project_id || data.projectId,
+      userId: data.user_id || data.userId,
+      userName: data.user_name || data.userName,
+      userEmail: data.user_email || data.userEmail,
+      responses: data.responses || {},
+      submittedAt: data.submitted_at || data.submittedAt
+    };
+  },
+
+  async deleteSubmission(id: string): Promise<void> {
+    const { error } = await supabase
+      .from('feedback_form_submissions')
       .delete()
       .eq('id', id);
     if (error) throw error;

@@ -206,4 +206,91 @@ export interface CalendarEvent {
   createdAt: string;
 }
 
-export type ViewType = 'tasks' | 'upcoming' | 'notes' | 'analytics' | 'team' | 'profile' | 'complaints' | 'notifications' | 'chat' | 'feed' | 'projects' | 'emails' | 'calendar';
+export interface Survey {
+  id: string;
+  projectId: string;
+  createdBy: string; // User ID of management who created it
+  createdByName: string;
+  title: string;
+  description?: string;
+  programName?: string; // Name of the program this survey is for
+  eventName?: string; // Name of the event this survey is for
+  type: 'program' | 'event' | 'general'; // Type of survey
+  status: 'active' | 'closed'; // active = accepting feedback, closed = no longer accepting
+  deadline?: string; // Optional deadline for submissions
+  createdAt: string;
+}
+
+export interface PollOption {
+  id: string;
+  text: string;
+  votes: number;
+  voters: string[]; // User IDs who voted for this option
+}
+
+export interface Poll {
+  id: string;
+  projectId: string;
+  createdBy: string; // User ID of management who created it
+  createdByName: string;
+  question: string;
+  description?: string;
+  options: PollOption[]; // Array of poll options
+  status: 'active' | 'closed'; // active = accepting votes, closed = no longer accepting
+  allowMultipleVotes: boolean; // Whether users can vote multiple times
+  showResultsBeforeVoting: boolean; // Whether to show results before user votes
+  deadline?: string; // Optional deadline for voting
+  createdAt: string;
+}
+
+export interface FeedbackFormField {
+  id: string;
+  label: string;
+  type: 'text' | 'textarea' | 'number' | 'email' | 'date' | 'select' | 'radio' | 'checkbox' | 'rating';
+  required: boolean;
+  placeholder?: string;
+  options?: string[]; // For select, radio, checkbox types
+  min?: number; // For number, rating
+  max?: number; // For number, rating
+  rows?: number; // For textarea
+}
+
+export interface FeedbackForm {
+  id: string;
+  projectId: string;
+  createdBy: string; // User ID of management who created it
+  createdByName: string;
+  title: string;
+  description?: string;
+  fields: FeedbackFormField[]; // Array of form fields
+  status: 'active' | 'closed'; // active = accepting responses, closed = no longer accepting
+  deadline?: string; // Optional deadline for submissions
+  allowMultipleSubmissions: boolean; // Whether users can submit multiple times
+  createdAt: string;
+}
+
+export interface FeedbackFormResponse {
+  id: string;
+  formId: string;
+  projectId: string;
+  userId?: string; // Optional - if user is logged in
+  userName?: string;
+  userEmail?: string;
+  responses: { [fieldId: string]: string | string[] | number }; // Field ID to response value mapping
+  submittedAt: string;
+}
+
+export interface Feedback {
+  id: string;
+  projectId: string;
+  surveyId?: string; // Optional - link to a specific survey/review
+  userId?: string; // Optional - if user is logged in
+  userName?: string; // Optional - user's name (if logged in) or provided name
+  userEmail?: string; // Optional - user's email (if logged in) or provided email
+  subject: string;
+  message: string;
+  isPrivate: boolean; // true = private, false = open/public
+  createdAt: string;
+}
+
+export type ViewType = 'tasks' | 'upcoming' | 'notes' | 'analytics' | 'team' | 'profile' | 'complaints' | 'notifications' | 'chat' | 'feed' | 'projects' | 'emails' | 'calendar' | 'feedback';

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Task, Priority, ViewType, Note, Role, User, Complaint, ComplaintAttachment, Notification, Message, Group, MessageAttachment, Post, Comment, Project, Email, CallInfo, CalendarEvent } from './types';
+import { Task, Priority, ViewType, Note, Role, User, Complaint, ComplaintAttachment, Notification, Message, Group, MessageAttachment, Post, Comment, Project, Email, CallInfo, CalendarEvent, Feedback, Survey, Poll, FeedbackForm, FeedbackFormResponse, FeedbackFormField } from './types';
 import { 
   userService, 
   projectService, 
@@ -13,6 +13,10 @@ import {
   groupService, 
   emailService,
   calendarService,
+  feedbackService,
+  surveyService,
+  pollService,
+  feedbackFormService,
   supabase 
 } from './services/supabaseService';
 import { TaskCard } from './components/TaskCard';
@@ -28,6 +32,7 @@ import { FeedView } from './components/FeedView';
 import { ProjectsView } from './components/ProjectsView';
 import { EmailsView } from './components/EmailsView';
 import { CalendarView } from './components/CalendarView';
+import { FeedbackView } from './components/FeedbackView';
 import { 
   Plus, 
   Calendar, 
@@ -52,7 +57,8 @@ import {
   Globe,
   Layers,
   ChevronDown,
-  Mail
+  Mail,
+  MessageSquare
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -86,6 +92,10 @@ const App: React.FC = () => {
   const [groups, setGroups] = useState<Group[]>([]);
   const [emails, setEmails] = useState<Email[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+  const [feedbacks, setFeedbacks] = useState<Feedback[]>([]);
+  const [surveys, setSurveys] = useState<Survey[]>([]);
+  const [polls, setPolls] = useState<Poll[]>([]);
+  const [forms, setForms] = useState<FeedbackForm[]>([]);
   
   // Set initial view to 'feed' (Social) on mobile, 'profile' on desktop
   const [view, setView] = useState<ViewType>(isMobileDevice() ? 'feed' : 'profile');
@@ -265,6 +275,63 @@ const App: React.FC = () => {
           userRole: c.user_role || c.userRole,
           targetUserId: c.target_user_id || c.targetUserId,
           createdAt: c.created_at || c.createdAt
+        })));
+
+        // Load feedbacks (include private for admins)
+        const isAdmin = currentUser?.role === Role.ADMIN;
+        const projectFeedbacks = await feedbackService.getByProject(currentProjectId, isAdmin);
+        setFeedbacks(projectFeedbacks.map((f: any) => ({
+          ...f,
+          projectId: f.project_id || f.projectId,
+          surveyId: f.survey_id || f.surveyId,
+          userId: f.user_id || f.userId,
+          userName: f.user_name || f.userName,
+          userEmail: f.user_email || f.userEmail,
+          isPrivate: f.is_private || f.isPrivate || false,
+          createdAt: f.created_at || f.createdAt
+        })));
+
+        // Load surveys (include closed for management)
+        const isManagementUser = isAdmin || currentUser?.role === Role.MANAGEMENT || currentUser?.role === Role.HOD;
+        const projectSurveys = await surveyService.getByProject(currentProjectId, isManagementUser);
+        setSurveys(projectSurveys.map((s: any) => ({
+          ...s,
+          projectId: s.project_id || s.projectId,
+          createdBy: s.created_by || s.createdBy,
+          createdByName: s.created_by_name || s.createdByName,
+          programName: s.program_name || s.programName,
+          eventName: s.event_name || s.eventName,
+          type: s.type || 'general',
+          status: s.status || 'active',
+          deadline: s.deadline,
+          createdAt: s.created_at || s.createdAt
+        })));
+
+        // Load polls (include closed for management)
+        const projectPolls = await pollService.getByProject(currentProjectId, isManagementUser);
+        setPolls(projectPolls.map((p: any) => ({
+          ...p,
+          projectId: p.project_id || p.projectId,
+          createdBy: p.created_by || p.createdBy,
+          createdByName: p.created_by_name || p.createdByName,
+          options: p.options || [],
+          allowMultipleVotes: p.allow_multiple_votes || p.allowMultipleVotes || false,
+          showResultsBeforeVoting: p.show_results_before_voting || p.showResultsBeforeVoting || false,
+          deadline: p.deadline,
+          createdAt: p.created_at || p.createdAt
+        })));
+
+        // Load feedback forms (include closed for management)
+        const projectForms = await feedbackFormService.getByProject(currentProjectId, isManagementUser);
+        setForms(projectForms.map((f: any) => ({
+          ...f,
+          projectId: f.project_id || f.projectId,
+          createdBy: f.created_by || f.createdBy,
+          createdByName: f.created_by_name || f.createdByName,
+          fields: f.fields || [],
+          allowMultipleSubmissions: f.allow_multiple_submissions || f.allowMultipleSubmissions || false,
+          deadline: f.deadline,
+          createdAt: f.created_at || f.createdAt
         })));
 
         // Load messages
@@ -680,7 +747,161 @@ const App: React.FC = () => {
         )
         .subscribe();
 
-      subscriptions.push(tasksSub, postsSub, messagesSub, notesSub, complaintsSub, emailsSub, groupsSub, calendarSub);
+      // Feedback subscription
+      const feedbackSub = supabase
+        .channel('feedback_changes')
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'feedback', filter: `project_id=eq.${currentProjectId}` },
+          async (payload) => {
+            if (payload.eventType === 'INSERT') {
+              const newFeedback = payload.new as any;
+              setFeedbacks(prev => [...prev, {
+                ...newFeedback,
+                projectId: newFeedback.project_id || newFeedback.projectId,
+                surveyId: newFeedback.survey_id || newFeedback.surveyId,
+                userId: newFeedback.user_id || newFeedback.userId,
+                userName: newFeedback.user_name || newFeedback.userName,
+                userEmail: newFeedback.user_email || newFeedback.userEmail,
+                isPrivate: newFeedback.is_private || newFeedback.isPrivate || false,
+                createdAt: newFeedback.created_at || newFeedback.createdAt
+              }]);
+            } else if (payload.eventType === 'UPDATE') {
+              const updatedFeedback = payload.new as any;
+              setFeedbacks(prev => prev.map(f => f.id === updatedFeedback.id ? {
+                ...updatedFeedback,
+                projectId: updatedFeedback.project_id || updatedFeedback.projectId,
+                surveyId: updatedFeedback.survey_id || updatedFeedback.surveyId,
+                userId: updatedFeedback.user_id || updatedFeedback.userId,
+                userName: updatedFeedback.user_name || updatedFeedback.userName,
+                userEmail: updatedFeedback.user_email || updatedFeedback.userEmail,
+                isPrivate: updatedFeedback.is_private || updatedFeedback.isPrivate || false,
+                createdAt: updatedFeedback.created_at || updatedFeedback.createdAt
+              } : f));
+            } else if (payload.eventType === 'DELETE') {
+              setFeedbacks(prev => prev.filter(f => f.id !== payload.old.id));
+            }
+          }
+        )
+        .subscribe();
+
+      // Survey subscription
+      const surveySub = supabase
+        .channel('surveys_changes')
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'surveys', filter: `project_id=eq.${currentProjectId}` },
+          async (payload) => {
+            if (payload.eventType === 'INSERT') {
+              const newSurvey = payload.new as any;
+              setSurveys(prev => [...prev, {
+                ...newSurvey,
+                projectId: newSurvey.project_id || newSurvey.projectId,
+                createdBy: newSurvey.created_by || newSurvey.createdBy,
+                createdByName: newSurvey.created_by_name || newSurvey.createdByName,
+                programName: newSurvey.program_name || newSurvey.programName,
+                eventName: newSurvey.event_name || newSurvey.eventName,
+                type: newSurvey.type || 'general',
+                status: newSurvey.status || 'active',
+                deadline: newSurvey.deadline,
+                createdAt: newSurvey.created_at || newSurvey.createdAt
+              }]);
+            } else if (payload.eventType === 'UPDATE') {
+              const updatedSurvey = payload.new as any;
+              setSurveys(prev => prev.map(s => s.id === updatedSurvey.id ? {
+                ...updatedSurvey,
+                projectId: updatedSurvey.project_id || updatedSurvey.projectId,
+                createdBy: updatedSurvey.created_by || updatedSurvey.createdBy,
+                createdByName: updatedSurvey.created_by_name || updatedSurvey.createdByName,
+                programName: updatedSurvey.program_name || updatedSurvey.programName,
+                eventName: updatedSurvey.event_name || updatedSurvey.eventName,
+                type: updatedSurvey.type || 'general',
+                status: updatedSurvey.status || 'active',
+                deadline: updatedSurvey.deadline,
+                createdAt: updatedSurvey.created_at || updatedSurvey.createdAt
+              } : s));
+            } else if (payload.eventType === 'DELETE') {
+              setSurveys(prev => prev.filter(s => s.id !== payload.old.id));
+            }
+          }
+        )
+        .subscribe();
+
+      // Poll subscription
+      const pollSub = supabase
+        .channel('polls_changes')
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'polls', filter: `project_id=eq.${currentProjectId}` },
+          async (payload) => {
+            if (payload.eventType === 'INSERT') {
+              const newPoll = payload.new as any;
+              setPolls(prev => [...prev, {
+                ...newPoll,
+                projectId: newPoll.project_id || newPoll.projectId,
+                createdBy: newPoll.created_by || newPoll.createdBy,
+                createdByName: newPoll.created_by_name || newPoll.createdByName,
+                options: newPoll.options || [],
+                allowMultipleVotes: newPoll.allow_multiple_votes || newPoll.allowMultipleVotes || false,
+                showResultsBeforeVoting: newPoll.show_results_before_voting || newPoll.showResultsBeforeVoting || false,
+                deadline: newPoll.deadline,
+                createdAt: newPoll.created_at || newPoll.createdAt
+              }]);
+            } else if (payload.eventType === 'UPDATE') {
+              const updatedPoll = payload.new as any;
+              setPolls(prev => prev.map(p => p.id === updatedPoll.id ? {
+                ...updatedPoll,
+                projectId: updatedPoll.project_id || updatedPoll.projectId,
+                createdBy: updatedPoll.created_by || updatedPoll.createdBy,
+                createdByName: updatedPoll.created_by_name || updatedPoll.createdByName,
+                options: updatedPoll.options || [],
+                allowMultipleVotes: updatedPoll.allow_multiple_votes || updatedPoll.allowMultipleVotes || false,
+                showResultsBeforeVoting: updatedPoll.show_results_before_voting || updatedPoll.showResultsBeforeVoting || false,
+                deadline: updatedPoll.deadline,
+                createdAt: updatedPoll.created_at || updatedPoll.createdAt
+              } : p));
+            } else if (payload.eventType === 'DELETE') {
+              setPolls(prev => prev.filter(p => p.id !== payload.old.id));
+            }
+          }
+        )
+        .subscribe();
+
+      // Feedback Forms subscription
+      const formsSub = supabase
+        .channel('feedback_forms_changes')
+        .on('postgres_changes',
+          { event: '*', schema: 'public', table: 'feedback_forms', filter: `project_id=eq.${currentProjectId}` },
+          async (payload) => {
+            if (payload.eventType === 'INSERT') {
+              const newForm = payload.new as any;
+              setForms(prev => [...prev, {
+                ...newForm,
+                projectId: newForm.project_id || newForm.projectId,
+                createdBy: newForm.created_by || newForm.createdBy,
+                createdByName: newForm.created_by_name || newForm.createdByName,
+                fields: newForm.fields || [],
+                allowMultipleSubmissions: newForm.allow_multiple_submissions || newForm.allowMultipleSubmissions || false,
+                deadline: newForm.deadline,
+                createdAt: newForm.created_at || newForm.createdAt
+              }]);
+            } else if (payload.eventType === 'UPDATE') {
+              const updatedForm = payload.new as any;
+              setForms(prev => prev.map(f => f.id === updatedForm.id ? {
+                ...updatedForm,
+                projectId: updatedForm.project_id || updatedForm.projectId,
+                createdBy: updatedForm.created_by || updatedForm.createdBy,
+                createdByName: updatedForm.created_by_name || updatedForm.createdByName,
+                fields: updatedForm.fields || [],
+                allowMultipleSubmissions: updatedForm.allow_multiple_submissions || updatedForm.allowMultipleSubmissions || false,
+                deadline: updatedForm.deadline,
+                createdAt: updatedForm.created_at || updatedForm.createdAt
+              } : f));
+            } else if (payload.eventType === 'DELETE') {
+              setForms(prev => prev.filter(f => f.id !== payload.old.id));
+            }
+          }
+        )
+        .subscribe();
+
+      subscriptions.push(tasksSub, postsSub, messagesSub, notesSub, complaintsSub, emailsSub, groupsSub, calendarSub, feedbackSub, surveySub, pollSub, formsSub);
     };
 
     setupRealtimeSubscriptions();
@@ -784,6 +1005,27 @@ const App: React.FC = () => {
   const scopedNotes = useMemo(() => notes.filter(n => n.projectId === currentProjectId), [notes, currentProjectId]);
   const scopedPosts = useMemo(() => posts.filter(p => p.projectId === currentProjectId), [posts, currentProjectId]);
   const scopedComplaints = useMemo(() => complaints.filter(c => c.projectId === currentProjectId), [complaints, currentProjectId]);
+  const scopedFeedbacks = useMemo(() => {
+    const isAdmin = currentUser?.role === Role.ADMIN;
+    return feedbacks.filter(f => {
+      if (f.projectId !== currentProjectId) return false;
+      // Non-admins can only see public feedbacks
+      if (!isAdmin && f.isPrivate) return false;
+      return true;
+    });
+  }, [feedbacks, currentProjectId, currentUser]);
+
+  const scopedSurveys = useMemo(() => {
+    return surveys.filter(s => s.projectId === currentProjectId);
+  }, [surveys, currentProjectId]);
+
+  const scopedPolls = useMemo(() => {
+    return polls.filter(p => p.projectId === currentProjectId);
+  }, [polls, currentProjectId]);
+
+  const scopedForms = useMemo(() => {
+    return forms.filter(f => f.projectId === currentProjectId);
+  }, [forms, currentProjectId]);
   const scopedNotifications = useMemo(() => notifications.filter(n => n.projectId === currentProjectId), [notifications, currentProjectId]);
   const scopedMessages = useMemo(() => messages.filter(m => m.projectId === currentProjectId), [messages, currentProjectId]);
   const scopedGroups = useMemo(() => groups.filter(g => g.projectId === currentProjectId), [groups, currentProjectId]);
@@ -1541,6 +1783,239 @@ const App: React.FC = () => {
     }
   };
 
+  const handleSubmitFeedback = async (subject: string, message: string, userName: string, userEmail: string, isPrivate: boolean, surveyId?: string) => {
+    if (!currentProjectId) {
+      alert('Please select a project first.');
+      return;
+    }
+    try {
+      await feedbackService.create({
+        projectId: currentProjectId,
+        surveyId: surveyId,
+        userId: currentUser?.id,
+        userName: userName || currentUser?.name,
+        userEmail: userEmail || currentUser?.email,
+        subject,
+        message,
+        isPrivate
+      });
+      // Real-time subscription will update the state automatically
+      alert('Thank you for your feedback!');
+    } catch (error) {
+      console.error('Failed to submit feedback:', error);
+      alert('Failed to submit feedback. Please try again.');
+    }
+  };
+
+  const handleDeleteFeedback = async (feedbackId: string) => {
+    try {
+      await feedbackService.delete(feedbackId);
+      // Real-time subscription will update the state automatically
+    } catch (error) {
+      console.error('Failed to delete feedback:', error);
+      alert('Failed to delete feedback. Please try again.');
+    }
+  };
+
+  const handleCreateSurvey = async (title: string, description: string, type: 'program' | 'event' | 'general', programName?: string, eventName?: string, deadline?: string) => {
+    if (!currentUser || !currentProjectId) {
+      alert('Please log in to create surveys.');
+      return;
+    }
+    if (currentUser.role !== Role.ADMIN && currentUser.role !== Role.MANAGEMENT && currentUser.role !== Role.HOD) {
+      alert('Only management can create surveys.');
+      return;
+    }
+    try {
+      await surveyService.create({
+        projectId: currentProjectId,
+        createdBy: currentUser.id,
+        createdByName: currentUser.name,
+        title,
+        description,
+        type,
+        programName,
+        eventName,
+        status: 'active',
+        deadline: deadline ? new Date(deadline).toISOString() : undefined
+      });
+      alert('Survey created successfully!');
+    } catch (error) {
+      console.error('Failed to create survey:', error);
+      alert('Failed to create survey. Please try again.');
+    }
+  };
+
+  const handleDeleteSurvey = async (surveyId: string) => {
+    try {
+      await surveyService.delete(surveyId);
+    } catch (error) {
+      console.error('Failed to delete survey:', error);
+      alert('Failed to delete survey. Please try again.');
+    }
+  };
+
+  const handleCloseSurvey = async (surveyId: string) => {
+    try {
+      await surveyService.update(surveyId, { status: 'closed' });
+    } catch (error) {
+      console.error('Failed to close survey:', error);
+      alert('Failed to close survey. Please try again.');
+    }
+  };
+
+  const handleCreatePoll = async (question: string, description: string, options: string[], allowMultipleVotes: boolean, showResultsBeforeVoting: boolean, deadline?: string) => {
+    if (!currentUser || !currentProjectId) {
+      alert('Please log in to create polls.');
+      return;
+    }
+    if (currentUser.role !== Role.ADMIN && currentUser.role !== Role.MANAGEMENT && currentUser.role !== Role.HOD) {
+      alert('Only management can create polls.');
+      return;
+    }
+    try {
+      // Generate IDs for options
+      const optionsWithIds: Poll['options'] = options.map((text, index) => ({
+        id: `opt_${Date.now()}_${Math.random().toString(36).substring(2, 11)}_${index}`,
+        text: text.trim(),
+        votes: 0,
+        voters: []
+      }));
+
+      await pollService.create({
+        projectId: currentProjectId,
+        createdBy: currentUser.id,
+        createdByName: currentUser.name,
+        question,
+        description,
+        options: optionsWithIds,
+        status: 'active',
+        allowMultipleVotes,
+        showResultsBeforeVoting,
+        deadline: deadline ? new Date(deadline).toISOString() : undefined
+      });
+      alert('Poll created successfully!');
+    } catch (error) {
+      console.error('Failed to create poll:', error);
+      alert('Failed to create poll. Please try again.');
+    }
+  };
+
+  const handleVotePoll = async (pollId: string, optionId: string) => {
+    if (!currentUser) {
+      alert('Please log in to vote.');
+      return;
+    }
+    try {
+      await pollService.vote(pollId, optionId, currentUser.id);
+    } catch (error: any) {
+      console.error('Failed to vote:', error);
+      alert(error.message || 'Failed to vote. Please try again.');
+    }
+  };
+
+  const handleDeletePoll = async (pollId: string) => {
+    try {
+      await pollService.delete(pollId);
+    } catch (error) {
+      console.error('Failed to delete poll:', error);
+      alert('Failed to delete poll. Please try again.');
+    }
+  };
+
+  const handleClosePoll = async (pollId: string) => {
+    try {
+      await pollService.update(pollId, { status: 'closed' });
+    } catch (error) {
+      console.error('Failed to close poll:', error);
+      alert('Failed to close poll. Please try again.');
+    }
+  };
+
+  const handleCreateForm = async (title: string, description: string, fields: FeedbackFormField[], allowMultipleSubmissions: boolean, deadline?: string) => {
+    if (!currentUser || !currentProjectId) {
+      alert('Please log in to create forms.');
+      return;
+    }
+    if (currentUser.role !== Role.ADMIN && currentUser.role !== Role.MANAGEMENT && currentUser.role !== Role.HOD) {
+      alert('Only management can create forms.');
+      return;
+    }
+    try {
+      await feedbackFormService.create({
+        projectId: currentProjectId,
+        createdBy: currentUser.id,
+        createdByName: currentUser.name,
+        title,
+        description,
+        fields,
+        status: 'active',
+        allowMultipleSubmissions,
+        deadline: deadline ? new Date(deadline).toISOString() : undefined
+      });
+      alert('Form created successfully!');
+    } catch (error) {
+      console.error('Failed to create form:', error);
+      alert('Failed to create form. Please try again.');
+    }
+  };
+
+  const handleSubmitForm = async (formId: string, responses: { [fieldId: string]: string | string[] | number }, userName: string, userEmail: string) => {
+    if (!currentProjectId) {
+      alert('Please select a project first.');
+      return;
+    }
+    try {
+      await feedbackFormService.submitResponse({
+        formId,
+        projectId: currentProjectId,
+        userId: currentUser?.id,
+        userName: userName || currentUser?.name || 'Anonymous',
+        userEmail: userEmail || currentUser?.email,
+        responses
+      });
+    } catch (error: any) {
+      console.error('Failed to submit form:', error);
+      throw error; // Re-throw so the component can handle it
+    }
+  };
+
+  const handleDeleteForm = async (formId: string) => {
+    try {
+      await feedbackFormService.delete(formId);
+    } catch (error) {
+      console.error('Failed to delete form:', error);
+      alert('Failed to delete form. Please try again.');
+    }
+  };
+
+  const handleCloseForm = async (formId: string) => {
+    try {
+      await feedbackFormService.update(formId, { status: 'closed' });
+    } catch (error) {
+      console.error('Failed to close form:', error);
+      alert('Failed to close form. Please try again.');
+    }
+  };
+
+  const handleGetFormSubmissions = async (formId: string): Promise<FeedbackFormResponse[]> => {
+    try {
+      return await feedbackFormService.getSubmissions(formId);
+    } catch (error) {
+      console.error('Failed to get form submissions:', error);
+      throw error;
+    }
+  };
+
+  const handleDeleteFormSubmission = async (submissionId: string) => {
+    try {
+      await feedbackFormService.deleteSubmission(submissionId);
+    } catch (error) {
+      console.error('Failed to delete submission:', error);
+      alert('Failed to delete submission. Please try again.');
+    }
+  };
+
   const handleSendMessage = async (receiverId: string | undefined, groupId: string | undefined, text: string, attachment?: MessageAttachment, replyToId?: string) => {
     if (!currentUser || !currentProjectId) return;
     try {
@@ -2079,6 +2554,29 @@ const App: React.FC = () => {
           onSubmitComplaint={handleSubmitComplaint}
           onResolveComplaint={handleResolveComplaint}
         /> : null;
+      case 'feedback':
+        return <FeedbackView
+          currentUser={currentUser}
+          feedbacks={scopedFeedbacks}
+          surveys={scopedSurveys}
+          polls={scopedPolls}
+          forms={scopedForms}
+          onSubmitFeedback={handleSubmitFeedback}
+          onDeleteFeedback={currentUser?.role === Role.ADMIN ? handleDeleteFeedback : undefined}
+          onCreateSurvey={(currentUser?.role === Role.ADMIN || currentUser?.role === Role.MANAGEMENT || currentUser?.role === Role.HOD) ? handleCreateSurvey : undefined}
+          onDeleteSurvey={(currentUser?.role === Role.ADMIN || currentUser?.role === Role.MANAGEMENT || currentUser?.role === Role.HOD) ? handleDeleteSurvey : undefined}
+          onCloseSurvey={(currentUser?.role === Role.ADMIN || currentUser?.role === Role.MANAGEMENT || currentUser?.role === Role.HOD) ? handleCloseSurvey : undefined}
+          onCreatePoll={(currentUser?.role === Role.ADMIN || currentUser?.role === Role.MANAGEMENT || currentUser?.role === Role.HOD) ? handleCreatePoll : undefined}
+          onVotePoll={handleVotePoll}
+          onDeletePoll={(currentUser?.role === Role.ADMIN || currentUser?.role === Role.MANAGEMENT || currentUser?.role === Role.HOD) ? handleDeletePoll : undefined}
+          onClosePoll={(currentUser?.role === Role.ADMIN || currentUser?.role === Role.MANAGEMENT || currentUser?.role === Role.HOD) ? handleClosePoll : undefined}
+          onCreateForm={(currentUser?.role === Role.ADMIN || currentUser?.role === Role.MANAGEMENT || currentUser?.role === Role.HOD) ? handleCreateForm : undefined}
+          onSubmitForm={handleSubmitForm}
+          onDeleteForm={(currentUser?.role === Role.ADMIN || currentUser?.role === Role.MANAGEMENT || currentUser?.role === Role.HOD) ? handleDeleteForm : undefined}
+          onCloseForm={(currentUser?.role === Role.ADMIN || currentUser?.role === Role.MANAGEMENT || currentUser?.role === Role.HOD) ? handleCloseForm : undefined}
+          onGetFormSubmissions={handleGetFormSubmissions}
+          onDeleteFormSubmission={(currentUser?.role === Role.ADMIN || currentUser?.role === Role.MANAGEMENT || currentUser?.role === Role.HOD) ? handleDeleteFormSubmission : undefined}
+        />;
       case 'chat':
         return currentUser ? <ChatView 
           currentUser={currentUser} 
@@ -2217,6 +2715,7 @@ const App: React.FC = () => {
           <div className="flex items-center gap-2">
             <button onClick={() => setView('calendar')} className={`p-2.5 shadow-sm border rounded-2xl transition-all ${view === 'calendar' ? 'bg-orange-600 text-white border-orange-600' : 'bg-white border-slate-100 text-slate-600'}`} title="Calendar"><Calendar size={18} /></button>
             <button onClick={() => setView('emails')} className={`p-2.5 shadow-sm border rounded-2xl transition-all ${view === 'emails' ? 'bg-orange-600 text-white border-orange-600' : 'bg-white border-slate-100 text-slate-600'}`}><Mail size={18} /></button>
+            <button onClick={() => setView('feedback')} className={`p-2.5 shadow-sm border rounded-2xl transition-all ${view === 'feedback' ? 'bg-orange-600 text-white border-orange-600' : 'bg-white border-slate-100 text-slate-600'}`} title="Feedback"><MessageSquare size={18} /></button>
             <button onClick={() => setView('complaints')} className={`p-2.5 shadow-sm border rounded-2xl transition-all ${view === 'complaints' ? 'bg-orange-600 text-white border-orange-600' : 'bg-white border-slate-100 text-slate-600'}`}><HelpCircle size={18} /></button>
             <button onClick={() => setView('notifications')} className={`p-2.5 shadow-sm border rounded-2xl relative transition-all ${view === 'notifications' ? 'bg-orange-600 text-white border-orange-600' : 'bg-white border-slate-100 text-slate-600'}`}><Bell size={18} />{unreadNotifCount > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-600 text-white text-[8px] flex items-center justify-center rounded-full font-bold border-2 border-white">{unreadNotifCount}</span>}</button>
           </div>
