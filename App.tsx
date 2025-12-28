@@ -599,7 +599,13 @@ const App: React.FC = () => {
                 return m;
               }));
             } else if (payload.eventType === 'DELETE') {
-              setMessages(prev => prev.filter(m => m.id !== payload.old.id));
+              const deletedMessageId = payload.old?.id || (payload.old as any)?.id;
+              if (deletedMessageId) {
+                console.log('Received DELETE event for message:', deletedMessageId);
+                setMessages(prev => prev.filter(m => m.id !== deletedMessageId));
+              } else {
+                console.warn('DELETE event received but no message ID found in payload.old:', payload.old);
+              }
             }
           }
         )
@@ -2307,35 +2313,20 @@ const App: React.FC = () => {
         return;
       }
 
-      // Always delete from database when "delete for everyone" is checked
-      // This ensures the message is removed from Supabase and synced to all users via real-time
       if (deleteForEveryone) {
-        // Delete from database - this will remove it for everyone via real-time subscription
+        // Delete from database - real-time subscription will remove it for all users
         await messageService.delete(messageId);
         console.log('Message deleted from database (for everyone)');
-        
-        // Optimistically remove from UI immediately
-        setMessages(prev => prev.filter(m => m.id !== messageId));
+        // Don't optimistically update - let real-time subscription handle it for consistency
       } else {
-        // Delete only for sender - still delete from database but mark as deleted for sender
-        // For now, we'll delete from database to ensure consistency
+        // Delete only for current user - remove from local state only
         // In a future enhancement, you could add a "deleted_for" field to track per-user deletions
-        await messageService.delete(messageId);
-        console.log('Message deleted from database (sender only)');
-        
-        // Remove from UI
         setMessages(prev => prev.filter(m => m.id !== messageId));
+        console.log('Message deleted locally (for sender only)');
       }
-      
-      // Real-time subscription will handle updates and sync to all connected clients
     } catch (error) {
-      console.error('Failed to delete message from database:', error);
-      // Re-add the message if delete failed
-      const message = messages.find(m => m.id === messageId);
-      if (message) {
-        setMessages(prev => [...prev, message]);
-      }
-      alert('Failed to delete message. Please check console for details.');
+      console.error('Failed to delete message:', error);
+      alert('Failed to delete message. Please try again.');
     }
   };
 
