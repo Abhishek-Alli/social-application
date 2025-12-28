@@ -67,6 +67,9 @@ export const AuthView: React.FC<AuthViewProps> = ({
   const [showAllPosts, setShowAllPosts] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSettingScreenLock, setIsSettingScreenLock] = useState(false);
+  const [screenLockPassword, setScreenLockPassword] = useState('');
+  const [confirmScreenLockPassword, setConfirmScreenLockPassword] = useState('');
   const [isIdentityCardOpen, setIsIdentityCardOpen] = useState(false);
   const [viewingUserProfile, setViewingUserProfile] = useState<User | null>(null);
   const [showConnectionsModal, setShowConnectionsModal] = useState(false);
@@ -240,38 +243,65 @@ export const AuthView: React.FC<AuthViewProps> = ({
     
     setIsDownloading(true);
     try {
-      // Capture the identity card as a canvas
+      // Store original styles
+      const originalWidth = identityCardRef.current.style.width;
+      const originalHeight = identityCardRef.current.style.height;
+      const originalMaxWidth = identityCardRef.current.style.maxWidth;
+      const originalTransform = identityCardRef.current.style.transform;
+      
+      // Set fixed dimensions for PDF generation to prevent overlap
+      const fixedWidth = 280; // Match the card width
+      identityCardRef.current.style.width = `${fixedWidth}px`;
+      identityCardRef.current.style.maxWidth = `${fixedWidth}px`;
+      identityCardRef.current.style.height = 'auto';
+      identityCardRef.current.style.transform = 'none';
+      
+      // Wait for DOM to update
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // Get actual height after width is set
+      const actualHeight = identityCardRef.current.scrollHeight || 500;
+      
+      // Capture the identity card as a canvas with better options
       const canvas = await html2canvas(identityCardRef.current, {
         backgroundColor: '#ffffff',
-        scale: 2,
+        scale: 3, // Higher scale for better quality
         logging: false,
         useCORS: true,
-        width: identityCardRef.current.offsetWidth,
-        height: identityCardRef.current.offsetHeight
+        allowTaint: true,
+        width: fixedWidth,
+        height: actualHeight,
+        windowWidth: fixedWidth,
+        windowHeight: actualHeight
       });
       
+      // Restore original styles
+      identityCardRef.current.style.width = originalWidth;
+      identityCardRef.current.style.maxWidth = originalMaxWidth;
+      identityCardRef.current.style.height = originalHeight;
+      identityCardRef.current.style.transform = originalTransform;
+      
       // Get image data
-      const imgData = canvas.toDataURL('image/png');
+      const imgData = canvas.toDataURL('image/png', 1.0);
       
       // Calculate dimensions for PDF (maintaining aspect ratio)
-      const cardWidth = identityCardRef.current.offsetWidth;
-      const cardHeight = identityCardRef.current.offsetHeight;
-      const aspectRatio = cardHeight / cardWidth;
+      const imgWidth = canvas.width;
+      const imgHeight = canvas.height;
+      const aspectRatio = imgHeight / imgWidth;
       
-      // PDF dimensions in mm (A4 is 210x297mm, but we'll use a custom size for the card)
-      // Convert pixels to mm (assuming 96 DPI: 1px = 0.264583mm)
-      const pdfWidth = 85; // ~320px in mm (standard ID card width)
+      // PDF dimensions in mm (standard ID card size: 85.6mm x 53.98mm, but we'll use portrait)
+      const pdfWidth = 85.6; // Standard ID card width in mm
       const pdfHeight = pdfWidth * aspectRatio;
       
-      // Create PDF
+      // Create PDF with proper dimensions
       const pdf = new jsPDF({
         orientation: pdfHeight > pdfWidth ? 'portrait' : 'landscape',
         unit: 'mm',
         format: [pdfWidth, pdfHeight]
       });
       
-      // Add image to PDF (fill the entire page)
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      // Add image to PDF with proper scaling
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
       
       // Save PDF
       pdf.save(`${currentUser.name || 'Identity'}_ID_Card.pdf`);
@@ -303,6 +333,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
         backgroundImage: editForm.backgroundImage
       });
       setIsEditingProfile(false);
+      alert('Profile updated successfully!');
     } catch (error) {
       console.error('Failed to update profile:', error);
       alert('Failed to update profile. Please try again.');
@@ -405,7 +436,28 @@ export const AuthView: React.FC<AuthViewProps> = ({
               <p className="text-xs text-slate-500">{currentUser.contactNo}</p>
             )}
             <div className="flex items-center justify-center gap-2 mt-2">
-              <span className="text-xs text-slate-500">{safeAllUsers.length - 1}+ connections</span>
+              {(() => {
+                const userConnections = safeConnections.filter((c: any) => 
+                  c.status === 'accepted' && 
+                  (c.userId === currentUser?.id || c.connectedUserId === currentUser?.id)
+                );
+                const connectionCount = [...new Set(userConnections.map((c: any) => 
+                  c.userId === currentUser?.id ? c.connectedUserId : c.userId
+                ))].length;
+                return (
+                  <span 
+                    className="text-xs text-slate-500 cursor-pointer hover:text-orange-600 transition-colors"
+                    onClick={() => {
+                      if (connectionCount > 0) {
+                        setViewingUserProfile(currentUser);
+                        setShowConnectionsModal(true);
+                      }
+                    }}
+                  >
+                    {connectionCount} {connectionCount === 1 ? 'Connection' : 'Connections'}
+                  </span>
+                );
+              })()}
             </div>
           </div>
 
@@ -421,7 +473,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
               </button>
             </div>
             <p className="text-xs text-slate-600 leading-relaxed">
-              {currentUser.bio || `Hi, I'm ${currentUser.name}, ${currentUser.designation ? `a ${currentUser.designation}` : 'a team member'} at ${currentUser.department || 'SRJ World of Steel'}. ${currentUser.email ? `Contact me at ${currentUser.email}` : ''}`}
+              {currentUser.bio && currentUser.bio.trim() ? currentUser.bio : `Hi, I'm ${currentUser.name}, ${currentUser.designation ? `a ${currentUser.designation}` : 'a team member'} at ${currentUser.department || 'SRJ World of Steel'}. ${currentUser.email ? `Contact me at ${currentUser.email}` : ''}`}
             </p>
             <div className="mt-3 pt-3 border-t border-slate-100 grid grid-cols-2 gap-3 text-xs">
               <div>
@@ -1290,6 +1342,115 @@ export const AuthView: React.FC<AuthViewProps> = ({
               </div>
               
               <div className="p-6 space-y-6">
+                {/* Screen Lock Password Section */}
+                <div className="bg-slate-50 rounded-2xl border border-slate-200 p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <Lock size={20} className="text-orange-600" />
+                      <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest">Screen Lock</h3>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setIsSettingScreenLock(!isSettingScreenLock);
+                        setScreenLockPassword('');
+                        setConfirmScreenLockPassword('');
+                      }}
+                      className="text-xs font-bold text-orange-600 hover:text-orange-700 transition-colors"
+                    >
+                      {isSettingScreenLock ? 'Cancel' : currentUser.screenLockPassword ? 'Change' : 'Set'}
+                    </button>
+                  </div>
+
+                  {isSettingScreenLock && (
+                    <form onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!screenLockPassword.trim()) {
+                        alert('Please enter a screen lock password');
+                        return;
+                      }
+                      if (screenLockPassword !== confirmScreenLockPassword) {
+                        alert('Screen lock passwords do not match');
+                        return;
+                      }
+                      if (screenLockPassword.length < 4) {
+                        alert('Screen lock password must be at least 4 characters');
+                        return;
+                      }
+                      try {
+                        await onUpdateProfile?.({ screenLockPassword });
+                        alert('Screen lock password set successfully!');
+                        setIsSettingScreenLock(false);
+                        setScreenLockPassword('');
+                        setConfirmScreenLockPassword('');
+                      } catch (error) {
+                        console.error('Failed to set screen lock password:', error);
+                        alert('Failed to set screen lock password. Please try again.');
+                      }
+                    }} className="space-y-3 animate-in slide-in-from-top-2">
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Screen Lock Password</label>
+                        <input
+                          type="password"
+                          value={screenLockPassword}
+                          onChange={(e) => setScreenLockPassword(e.target.value)}
+                          className="w-full p-3 bg-white rounded-xl border-2 border-transparent focus:border-orange-500 text-sm font-medium transition-all"
+                          placeholder="Enter screen lock password (min 4 characters)"
+                          minLength={4}
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase mb-1">Confirm Screen Lock Password</label>
+                        <input
+                          type="password"
+                          value={confirmScreenLockPassword}
+                          onChange={(e) => setConfirmScreenLockPassword(e.target.value)}
+                          className="w-full p-3 bg-white rounded-xl border-2 border-transparent focus:border-orange-500 text-sm font-medium transition-all"
+                          placeholder="Confirm screen lock password"
+                          minLength={4}
+                          required
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        className="w-full py-2 bg-orange-600 text-white text-xs font-bold uppercase tracking-wide rounded-xl shadow-md active:scale-95 transition-all flex items-center justify-center gap-2"
+                      >
+                        <Lock size={14} /> {currentUser.screenLockPassword ? 'Update Screen Lock' : 'Set Screen Lock'}
+                      </button>
+                      {currentUser.screenLockPassword && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (window.confirm('Are you sure you want to remove the screen lock? You will need to log in again next time.')) {
+                              try {
+                                await onUpdateProfile?.({ screenLockPassword: '' });
+                                alert('Screen lock removed successfully!');
+                                setIsSettingScreenLock(false);
+                                setScreenLockPassword('');
+                                setConfirmScreenLockPassword('');
+                              } catch (error) {
+                                console.error('Failed to remove screen lock:', error);
+                                alert('Failed to remove screen lock. Please try again.');
+                              }
+                            }
+                          }}
+                          className="w-full py-2 bg-slate-200 text-slate-700 text-xs font-bold uppercase tracking-wide rounded-xl hover:bg-slate-300 transition-all"
+                        >
+                          Remove Screen Lock
+                        </button>
+                      )}
+                    </form>
+                  )}
+
+                  {!isSettingScreenLock && (
+                    <p className="text-xs text-slate-500">
+                      {currentUser.screenLockPassword 
+                        ? 'Screen lock is enabled. Your app will be locked when reopened.'
+                        : 'Set a screen lock password to secure your app when it reopens.'}
+                    </p>
+                  )}
+                </div>
+
                 {/* Change Password Section */}
                 <div className="bg-slate-50 rounded-2xl border border-slate-200 p-5">
                   <div className="flex items-center justify-between mb-4">
@@ -1433,50 +1594,51 @@ export const AuthView: React.FC<AuthViewProps> = ({
                           <div className="relative mx-auto w-full max-w-[280px]">
                             <div 
                               ref={identityCardRef}
-                              className="relative mx-auto w-full max-w-[280px] bg-white rounded-[2rem] shadow-xl border-4 border-orange-600 overflow-hidden flex flex-col min-h-[450px]"
+                              className="relative mx-auto w-full max-w-[280px] bg-white rounded-[2rem] shadow-xl border-4 border-orange-600 overflow-hidden flex flex-col"
+                              style={{ width: '250px' }}
                             >
-                              <div className="flex-1 bg-gradient-to-b from-slate-50 to-white flex flex-col items-center pt-6 px-5 pb-10 text-center">
-                                <div className="text-[8px] font-black text-orange-600 uppercase tracking-widest mb-4">THE MAIN ENTERPRISE</div>
+                              <div className="flex-1 bg-gradient-to-b from-slate-50 to-white flex flex-col items-center pt-6 px-5 pb-10 text-center" style={{ minHeight: '500px' }}>
+                                <div className="text-lg font-black text-slate-900 mb-4" style={{ lineHeight: '1.2', fontFamily: "'Leckerli One', cursive" }}>SRJ SOCIAL</div>
                                 <div className="relative mb-3">
-                                  <div className="w-24 h-24 rounded-full border-[4px] border-orange-600 shadow-lg overflow-hidden bg-slate-100 flex items-center justify-center">
+                                  <div className="w-24 h-24 rounded-full border-[4px] border-orange-600 shadow-lg overflow-hidden bg-slate-100 flex items-center justify-center" style={{ flexShrink: 0 }}>
                                     {currentUser.profilePhoto ? (
-                                      <img src={currentUser.profilePhoto} className="w-full h-full object-cover" alt="Identity" />
+                                      <img src={currentUser.profilePhoto} className="w-full h-full object-cover" alt="Identity" style={{ display: 'block' }} />
                                     ) : (
                                       <UserCircle size={56} className="text-slate-300" />
                                     )}
                                   </div>
-                                  <div className={`absolute bottom-0 right-0 w-5 h-5 border-[3px] border-white rounded-full flex items-center justify-center ${currentUser.isEmailVerified ? 'bg-emerald-500' : 'bg-amber-500'}`}>
+                                  <div className={`absolute bottom-0 right-0 w-5 h-5 border-[3px] border-white rounded-full flex items-center justify-center ${currentUser.isEmailVerified ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ flexShrink: 0 }}>
                                     <Check className="text-white" size={8} />
                                   </div>
                                 </div>
 
-                                <h3 className="text-lg font-black text-slate-900 tracking-tight mb-1">{currentUser.name}</h3>
-                                <div className="bg-orange-600/10 px-2.5 py-0.5 rounded-full inline-block mb-4">
+                                <h3 className="text-lg font-black text-slate-900 tracking-tight mb-1" style={{ lineHeight: '1.3', wordWrap: 'break-word', maxWidth: '100%' }}>{currentUser.name}</h3>
+                                <div className="bg-orange-600/10 px-2.5 py-0.5 rounded-full inline-block mb-4" style={{ lineHeight: '1.2' }}>
                                   <span className="text-[8px] font-black text-orange-600 uppercase tracking-widest">{currentUser.designation || 'Specialist'}</span>
                                 </div>
 
-                                <div className="w-full grid grid-cols-2 gap-y-3 gap-x-4 text-left border-t border-slate-100 pt-4 pb-4">
-                                  <div className="space-y-0.5">
-                                    <span className="block text-[7px] font-black text-slate-400 uppercase tracking-widest">Employee ID</span>
-                                    <span className="block text-[9px] font-bold text-slate-800 uppercase tracking-tight">{currentUser.employeeId || 'SRJ-NODE'}</span>
+                                <div className="w-full grid grid-cols-2 gap-y-3 gap-x-4 text-left border-t border-slate-100 pt-4 pb-4" style={{ marginTop: 'auto' }}>
+                                  <div className="space-y-0.5" style={{ minHeight: '30px' }}>
+                                    <span className="block text-[7px] font-black text-slate-400 uppercase tracking-widest" style={{ lineHeight: '1.2' }}>Employee ID</span>
+                                    <span className="block text-[9px] font-bold text-slate-800 uppercase tracking-tight" style={{ lineHeight: '1.3', wordWrap: 'break-word' }}>{currentUser.employeeId || 'SRJ-NODE'}</span>
                                   </div>
-                                  <div className="space-y-0.5">
-                                    <span className="block text-[7px] font-black text-slate-400 uppercase tracking-widest">Department</span>
-                                    <span className="block text-[9px] font-bold text-slate-800 uppercase tracking-tight truncate">{currentUser.department || 'Operations'}</span>
+                                  <div className="space-y-0.5" style={{ minHeight: '30px' }}>
+                                    <span className="block text-[7px] font-black text-slate-400 uppercase tracking-widest" style={{ lineHeight: '1.2' }}>Department</span>
+                                    <span className="block text-[9px] font-bold text-slate-800 uppercase tracking-tight" style={{ lineHeight: '1.3', wordWrap: 'break-word' }}>{currentUser.department || 'Operations'}</span>
                                   </div>
-                                  <div className="space-y-0.5">
-                                    <span className="block text-[7px] font-black text-slate-400 uppercase tracking-widest">Verification</span>
-                                    <span className={`block text-[9px] font-bold uppercase tracking-tight ${currentUser.isEmailVerified ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                  <div className="space-y-0.5" style={{ minHeight: '30px' }}>
+                                    <span className="block text-[7px] font-black text-slate-400 uppercase tracking-widest" style={{ lineHeight: '1.2' }}>Verification</span>
+                                    <span className={`block text-[9px] font-bold uppercase tracking-tight ${currentUser.isEmailVerified ? 'text-emerald-600' : 'text-amber-600'}`} style={{ lineHeight: '1.3' }}>
                                       {currentUser.isEmailVerified ? 'Verified' : 'Pending'}
                                     </span>
                                   </div>
-                                  <div className="space-y-0.5">
-                                    <span className="block text-[7px] font-black text-slate-400 uppercase tracking-widest">Username</span>
-                                    <span className="block text-[9px] font-bold text-orange-600 uppercase tracking-tight">@{currentUser.username}</span>
+                                  <div className="space-y-0.5" style={{ minHeight: '30px' }}>
+                                    <span className="block text-[7px] font-black text-slate-400 uppercase tracking-widest" style={{ lineHeight: '1.2' }}>Username</span>
+                                    <span className="block text-[9px] font-bold text-orange-600 uppercase tracking-tight" style={{ lineHeight: '1.3', wordWrap: 'break-word' }}>@{currentUser.username}</span>
                                   </div>
-                                  <div className="col-span-2 space-y-0.5">
-                                    <span className="block text-[7px] font-black text-slate-400 uppercase tracking-widest">Work Email</span>
-                                    <span className="block text-[9px] font-bold text-slate-800 truncate">{currentUser.email}</span>
+                                  <div className="col-span-2 space-y-0.5" style={{ minHeight: '30px' }}>
+                                    <span className="block text-[7px] font-black text-slate-400 uppercase tracking-widest" style={{ lineHeight: '1.2' }}>Work Email</span>
+                                    <span className="block text-[9px] font-bold text-slate-800" style={{ lineHeight: '1.3', wordWrap: 'break-word' }}>{currentUser.email}</span>
                                   </div>
                                 </div>
                               </div>

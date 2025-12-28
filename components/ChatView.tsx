@@ -24,6 +24,7 @@ interface ChatViewProps {
   onJoinGroup: (groupId: string) => void;
   onStartCall: (type: 'audio' | 'video', targetId: string, isGroup: boolean) => void;
   onEndCall: (callId: string) => void;
+  initialUserId?: string | null;
 }
 
 export const ChatView: React.FC<ChatViewProps> = ({ 
@@ -37,9 +38,20 @@ export const ChatView: React.FC<ChatViewProps> = ({
   onCreateGroup,
   onJoinGroup,
   onStartCall,
-  onEndCall
+  onEndCall,
+  initialUserId
 }) => {
   const [activeChatUser, setActiveChatUser] = useState<User | null>(null);
+  
+  // Set initial user if provided
+  useEffect(() => {
+    if (initialUserId && allUsers.length > 0) {
+      const user = allUsers.find(u => u.id === initialUserId);
+      if (user && user.id !== currentUser.id) {
+        setActiveChatUser(user);
+      }
+    }
+  }, [initialUserId, allUsers, currentUser.id]);
   const [activeGroup, setActiveGroup] = useState<Group | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [messageText, setMessageText] = useState('');

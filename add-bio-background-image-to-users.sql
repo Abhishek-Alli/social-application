@@ -46,3 +46,4 @@ WHERE table_name = 'users'
   AND column_name IN ('bio', 'background_image')
 ORDER BY column_name;
 
+

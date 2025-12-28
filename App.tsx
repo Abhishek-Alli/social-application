@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Task, Priority, ViewType, Note, Role, User, Complaint, ComplaintAttachment, Notification, Message, Group, MessageAttachment, Post, Comment, Project, Email, CallInfo, CalendarEvent, Feedback, Survey, Poll, FeedbackForm, FeedbackFormResponse, FeedbackFormField, Connection } from './types';
 import { 
   userService, 
@@ -25,6 +25,7 @@ import { NoteCard } from './components/NoteCard';
 import { AddTaskModal } from './components/AddTaskModal';
 import { AddPostModal } from './components/AddPostModal';
 import { AuthView } from './components/AuthView';
+import { ScreenLock } from './components/ScreenLock';
 import { TeamView } from './components/TeamView';
 import { ComplaintsView } from './components/ComplaintsView';
 import { NotificationsView } from './components/NotificationsView';
@@ -59,7 +60,8 @@ import {
   Layers,
   ChevronDown,
   Mail,
-  MessageSquare
+  MessageSquare,
+  Menu
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -103,6 +105,10 @@ const App: React.FC = () => {
   const [posts, setPosts] = useState<Post[]>([]);
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  
+  // Audio ref for notification sound
+  const notificationSoundRef = useRef<HTMLAudioElement | null>(null);
+  const playedNotificationsRef = useRef<Set<string>>(new Set());
   const [messages, setMessages] = useState<Message[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [emails, setEmails] = useState<Email[]>([]);
@@ -115,16 +121,22 @@ const App: React.FC = () => {
   
   // Set initial view to 'feed' (Social) on mobile, 'profile' on desktop
   const [view, setView] = useState<ViewType>(isMobileDevice() ? 'feed' : 'profile');
+  const [chatUserId, setChatUserId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isPostModalOpen, setIsPostModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [taskSort, setTaskSort] = useState<SortType>('newest');
   const [showFilters, setShowFilters] = useState(false);
   const [showProjectSelector, setShowProjectSelector] = useState(false);
+  const [showNavMenu, setShowNavMenu] = useState(false);
   
   // Login flow state
   const [needsTwoStep, setNeedsTwoStep] = useState(false);
   const [pendingUser, setPendingUser] = useState<User | null>(null);
+  
+  // Screen lock state
+  const [isScreenLocked, setIsScreenLocked] = useState(false);
+  const [isCheckingScreenLock, setIsCheckingScreenLock] = useState(true);
 
   // Helper function to map Supabase data to TypeScript types
   const mapUserFromSupabase = (u: any): User => ({
@@ -136,6 +148,7 @@ const App: React.FC = () => {
             parentId: u.parent_id || u.parentId,
             projectId: u.project_id || u.projectId,
             employeeId: u.employee_id || u.employeeId,
+            screenLockPassword: u.screen_lock_password || u.screenLockPassword,
             department: u.department,
             subDepartment: u.sub_department || u.subDepartment,
             designation: u.designation,
@@ -210,6 +223,11 @@ const App: React.FC = () => {
             setView('feed');
           }
           console.log('✅ User loaded from Supabase');
+          
+          // Check if screen lock is enabled
+          if (dbUser.screenLockPassword) {
+            setIsScreenLocked(true);
+          }
         } else {
           // User no longer exists, clear saved data
           console.warn('⚠️ User no longer exists in database, clearing saved session');
@@ -218,15 +236,18 @@ const App: React.FC = () => {
           sessionStorage.removeItem('srj_user_id');
           localStorage.removeItem('srj_saved_credentials');
         }
+        setIsCheckingScreenLock(false);
       }).catch((error) => {
         // If database check fails, clear session
         console.warn('⚠️ Could not load user from database:', error);
         setCurrentUser(null);
         localStorage.removeItem('srj_user_id');
         sessionStorage.removeItem('srj_user_id');
+        setIsCheckingScreenLock(false);
       });
     } else {
       console.log('ℹ️ No saved user ID found, showing login screen');
+      setIsCheckingScreenLock(false);
     }
   }, []);
 
@@ -414,13 +435,18 @@ const App: React.FC = () => {
       if (currentUser) {
         const userNotifications = await loadData(() => notificationService.getByUser(currentUser.id, currentProjectId), 'notifications');
         if (userNotifications) {
-          setNotifications(userNotifications.map((n: any) => ({
+          const mappedNotifications = userNotifications.map((n: any) => ({
             ...n,
             projectId: n.project_id || n.projectId,
             userId: n.user_id || n.userId,
             linkTo: n.link_to || n.linkTo,
             createdAt: n.created_at || n.createdAt
-          })));
+          }));
+          setNotifications(mappedNotifications);
+          // Mark all existing notifications as already played (don't play sound on initial load)
+          mappedNotifications.forEach((n: Notification) => {
+            playedNotificationsRef.current.add(n.id);
+          });
         }
 
         // Load connections for current user
@@ -588,13 +614,25 @@ const App: React.FC = () => {
             async (payload) => {
               if (payload.eventType === 'INSERT') {
                 const newNotif = payload.new as any;
-                setNotifications(prev => [...prev, {
+                const notification: Notification = {
                   ...newNotif,
                   projectId: newNotif.project_id || newNotif.projectId,
                   userId: newNotif.user_id || newNotif.userId,
                   linkTo: newNotif.link_to || newNotif.linkTo,
                   createdAt: newNotif.created_at || newNotif.createdAt
-                }]);
+                };
+                setNotifications(prev => [...prev, notification]);
+                
+                // Play notification sound for new unread notifications
+                if (!notification.read && !playedNotificationsRef.current.has(notification.id)) {
+                  playedNotificationsRef.current.add(notification.id);
+                  if (notificationSoundRef.current) {
+                    notificationSoundRef.current.currentTime = 0;
+                    notificationSoundRef.current.play().catch(err => {
+                      console.log('Failed to play notification sound:', err);
+                    });
+                  }
+                }
               } else if (payload.eventType === 'UPDATE') {
                 const updatedNotif = payload.new as any;
                 setNotifications(prev => prev.map(n => n.id === updatedNotif.id ? {
@@ -1269,7 +1307,38 @@ const App: React.FC = () => {
     localStorage.removeItem('srj_saved_credentials');
     setNeedsTwoStep(false);
     setPendingUser(null);
+    setIsScreenLocked(false);
     setView('profile');
+  };
+
+  const handleUnlockScreen = async (password: string) => {
+    if (!currentUser) throw new Error('No user found');
+    
+    // Simple password comparison (in production, use proper hashing)
+    if (currentUser.screenLockPassword === password) {
+      setIsScreenLocked(false);
+      return;
+    }
+    
+    throw new Error('Incorrect password');
+  };
+
+  const handleUnlockWithLogin = async (username: string, password: string) => {
+    if (!currentUser) throw new Error('No user found');
+    
+    // Verify username matches current user
+    const cleanUsername = username.replace('@', '').trim().toLowerCase();
+    if (currentUser.username.toLowerCase() !== cleanUsername) {
+      throw new Error('Username does not match');
+    }
+    
+    // Verify password matches user's login password
+    if (currentUser.password !== password) {
+      throw new Error('Incorrect password');
+    }
+    
+    // If login credentials are correct, unlock the screen
+    setIsScreenLocked(false);
   };
 
   const handleUpdateProfile = async (updates: Partial<User>) => {
@@ -2089,22 +2158,51 @@ const App: React.FC = () => {
   const handleConnect = async (connectedUserId: string) => {
     if (!currentUser) return;
     try {
-      await connectionService.create({
-        userId: currentUser.id,
-        connectedUserId,
-        status: 'pending'
-      });
+      // Check if there's already a connection request from the other user
+      const existingConnection = await connectionService.getConnection(connectedUserId, currentUser.id);
       
-      // Notify the user being connected to
-      const connectedUser = users.find(u => u.id === connectedUserId);
-      if (connectedUser) {
-        await addNotification(
+      if (existingConnection) {
+        // If the other user already sent a request, auto-accept it
+        if (existingConnection.status === 'pending' && existingConnection.userId === connectedUserId) {
+          await connectionService.update(existingConnection.id, { status: 'accepted' });
+          
+          // Notify the user who sent the original request
+          const connectedUser = users.find(u => u.id === connectedUserId);
+          if (connectedUser) {
+            await addNotification(
+              connectedUserId,
+              'Connection Accepted',
+              `${currentUser.name} accepted your connection request`,
+              'connection',
+              'profile'
+            );
+          }
+          alert('Connection accepted!');
+        } else if (existingConnection.status === 'accepted') {
+          alert('You are already connected with this user.');
+        } else {
+          alert('Connection request already exists.');
+        }
+      } else {
+        // Create a new connection request
+        await connectionService.create({
+          userId: currentUser.id,
           connectedUserId,
-          'Connection Request',
-          `${currentUser.name} wants to connect with you`,
-          'connection',
-          'profile'
-        );
+          status: 'pending'
+        });
+        
+        // Notify the user being connected to
+        const connectedUser = users.find(u => u.id === connectedUserId);
+        if (connectedUser) {
+          await addNotification(
+            connectedUserId,
+            'Connection Request',
+            `${currentUser.name} wants to connect with you`,
+            'connection',
+            'profile'
+          );
+        }
+        alert('Connection request sent!');
       }
     } catch (error: any) {
       console.error('Failed to send connection request:', error);
@@ -2462,14 +2560,26 @@ const App: React.FC = () => {
   };
 
   const handleClearAllNotifications = async () => {
-    if (!currentUser) return;
+    if (!currentUser || !currentProjectId) return;
     try {
-      // Delete all notifications for current user in current project
-      const userNotifs = notifications.filter(n => n.userId === currentUser.id && n.projectId === currentProjectId);
-      for (const notif of userNotifs) {
-        await notificationService.delete(notif.id);
+      // Delete all notifications for current user in current project from Supabase
+      const { error } = await supabase
+        .from('notifications')
+        .delete()
+        .eq('user_id', currentUser.id)
+        .eq('project_id', currentProjectId);
+      
+      if (error) {
+        console.error('Failed to clear notifications from Supabase:', error);
+        throw error;
       }
+      
       // Real-time subscription will update the state automatically
+      // Also clear the played notifications ref for the cleared notifications
+      const userNotifs = notifications.filter(n => n.userId === currentUser.id && n.projectId === currentProjectId);
+      userNotifs.forEach(notif => {
+        playedNotificationsRef.current.delete(notif.id);
+      });
     } catch (error) {
       console.error('Failed to clear notifications:', error);
       alert('Failed to clear notifications. Please try again.');
@@ -2730,16 +2840,24 @@ const App: React.FC = () => {
           onJoinGroup={handleJoinGroup}
           onStartCall={handleStartCall}
           onEndCall={handleEndCall}
+          initialUserId={chatUserId}
         /> : null;
       case 'feed':
         return currentUser ? <FeedView 
           posts={scopedPosts} 
           currentUser={currentUser} 
-          allUsers={scopedUsers} 
+          allUsers={scopedUsers}
+          connections={connections}
           onLike={handleLikePost}
           onComment={handleCommentPost}
           onShare={handleSharePost}
           onDelete={handleDeletePost}
+          onConnect={handleConnect}
+          onDisconnect={handleDisconnect}
+          onNavigateToChat={(userId) => {
+            setChatUserId(userId);
+            setView('chat');
+          }}
         /> : null;
       case 'notifications':
         return currentUser ? (
@@ -2748,6 +2866,10 @@ const App: React.FC = () => {
             onMarkAsRead={handleMarkNotificationRead}
             onClearAll={handleClearAllNotifications}
             onNavigate={(v) => setView(v)}
+            onAcceptConnection={handleAcceptConnection}
+            onDeclineConnection={handleDisconnect}
+            connections={connections}
+            currentUserId={currentUser.id}
           />
         ) : null;
       case 'analytics':
@@ -2801,11 +2923,80 @@ const App: React.FC = () => {
     }
   };
 
+  // Show loading state while checking screen lock
+  if (isCheckingScreenLock) {
+    return (
+      <div className="flex flex-col h-screen max-w-md mx-auto bg-slate-50 relative overflow-hidden shadow-2xl no-scrollbar items-center justify-center">
+        <div className="w-12 h-12 border-4 border-orange-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // Show screen lock if user is logged in but screen is locked
+  if (currentUser && isScreenLocked) {
+    return <ScreenLock currentUser={currentUser} onUnlock={handleUnlockScreen} onUnlockWithLogin={handleUnlockWithLogin} onLogout={handleLogout} />;
+  }
+
   return (
     <div className="flex flex-col h-screen max-w-md mx-auto bg-slate-50 relative overflow-hidden shadow-2xl no-scrollbar">
+      {/* Notification Sound */}
+      <audio ref={notificationSoundRef} src="/app_logo/notification.mp3" preload="auto" />
       {/* Header */}
       <header className="p-6 pb-2">
         <div className="flex items-center justify-between mb-4">
+          <div className="relative">
+            <button 
+              onClick={() => setShowNavMenu(!showNavMenu)}
+              className="p-2.5 shadow-sm border rounded-2xl transition-all bg-white border-slate-100 text-slate-600 hover:bg-slate-50"
+              title="Menu"
+            >
+              <Menu size={18} />
+            </button>
+            
+            {showNavMenu && (
+              <>
+                <div 
+                  className="fixed inset-0 z-[59]" 
+                  onClick={() => setShowNavMenu(false)}
+                />
+                <div className="absolute top-12 left-0 w-56 bg-white border border-slate-100 rounded-2xl shadow-xl z-[60] overflow-hidden animate-in zoom-in-95 duration-200">
+                  <div className="p-4 bg-slate-50 border-b border-slate-100">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Navigation</span>
+                  </div>
+                  <div className="py-2">
+                    <button 
+                      onClick={() => { setView('calendar'); setShowNavMenu(false); }}
+                      className={`w-full flex items-center gap-3 px-4 py-3 text-xs font-bold text-left hover:bg-slate-50 transition-colors ${view === 'calendar' ? 'bg-orange-50 text-orange-600' : 'text-slate-700'}`}
+                    >
+                      <Calendar size={18} className={view === 'calendar' ? 'text-orange-600' : 'text-slate-400'} />
+                      <span>Calendar</span>
+                    </button>
+                    <button 
+                      onClick={() => { setView('emails'); setShowNavMenu(false); }}
+                      className={`w-full flex items-center gap-3 px-4 py-3 text-xs font-bold text-left hover:bg-slate-50 transition-colors ${view === 'emails' ? 'bg-orange-50 text-orange-600' : 'text-slate-700'}`}
+                    >
+                      <Mail size={18} className={view === 'emails' ? 'text-orange-600' : 'text-slate-400'} />
+                      <span>Mailbox</span>
+                    </button>
+                    <button 
+                      onClick={() => { setView('complaints'); setShowNavMenu(false); }}
+                      className={`w-full flex items-center gap-3 px-4 py-3 text-xs font-bold text-left hover:bg-slate-50 transition-colors ${view === 'complaints' ? 'bg-orange-50 text-orange-600' : 'text-slate-700'}`}
+                    >
+                      <HelpCircle size={18} className={view === 'complaints' ? 'text-orange-600' : 'text-slate-400'} />
+                      <span>Complaint Box</span>
+                    </button>
+                    <button 
+                      onClick={() => { setView('feedback'); setShowNavMenu(false); }}
+                      className={`w-full flex items-center gap-3 px-4 py-3 text-xs font-bold text-left hover:bg-slate-50 transition-colors ${view === 'feedback' ? 'bg-orange-50 text-orange-600' : 'text-slate-700'}`}
+                    >
+                      <MessageSquare size={18} className={view === 'feedback' ? 'text-orange-600' : 'text-slate-400'} />
+                      <span>Feedback Box</span>
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
           <div className="relative flex-1 flex justify-center">
             <button 
               onClick={() => currentUser?.role === Role.ADMIN && setShowProjectSelector(!showProjectSelector)}
@@ -2850,10 +3041,6 @@ const App: React.FC = () => {
             )}
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => setView('calendar')} className={`p-2.5 shadow-sm border rounded-2xl transition-all ${view === 'calendar' ? 'bg-orange-600 text-white border-orange-600' : 'bg-white border-slate-100 text-slate-600'}`} title="Calendar"><Calendar size={18} /></button>
-            <button onClick={() => setView('emails')} className={`p-2.5 shadow-sm border rounded-2xl transition-all ${view === 'emails' ? 'bg-orange-600 text-white border-orange-600' : 'bg-white border-slate-100 text-slate-600'}`}><Mail size={18} /></button>
-            <button onClick={() => setView('feedback')} className={`p-2.5 shadow-sm border rounded-2xl transition-all ${view === 'feedback' ? 'bg-orange-600 text-white border-orange-600' : 'bg-white border-slate-100 text-slate-600'}`} title="Feedback"><MessageSquare size={18} /></button>
-            <button onClick={() => setView('complaints')} className={`p-2.5 shadow-sm border rounded-2xl transition-all ${view === 'complaints' ? 'bg-orange-600 text-white border-orange-600' : 'bg-white border-slate-100 text-slate-600'}`}><HelpCircle size={18} /></button>
             <button onClick={() => setView('notifications')} className={`p-2.5 shadow-sm border rounded-2xl relative transition-all ${view === 'notifications' ? 'bg-orange-600 text-white border-orange-600' : 'bg-white border-slate-100 text-slate-600'}`}><Bell size={18} />{unreadNotifCount > 0 && <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-600 text-white text-[8px] flex items-center justify-center rounded-full font-bold border-2 border-white">{unreadNotifCount}</span>}</button>
           </div>
         </div>

@@ -42,6 +42,7 @@ export interface User {
   backgroundImage?: string; // Background/banner image (Base64)
   // Security
   password?: string;
+  screenLockPassword?: string; // Screen lock password (hashed)
   isTwoStepEnabled?: boolean;
   isEmailVerified?: boolean;
   // Integration

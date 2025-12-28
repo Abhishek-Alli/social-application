@@ -1,17 +1,40 @@
 
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import { Post, User, Comment } from '../types';
-import { Heart, MessageSquare, Share2, MoreHorizontal, User as UserIcon, Send, X, Trash2, Download, Users, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Heart, MessageSquare, Share2, MoreHorizontal, User as UserIcon, Send, X, Trash2, Download, Users, ChevronLeft, ChevronRight, Search, UserPlus, UserCircle, CheckCircle2, ChevronRight as ChevronRightIcon, MessageCircle } from 'lucide-react';
 
 interface FeedViewProps {
   posts: Post[];
   currentUser: User;
   allUsers: User[];
+  connections?: any[];
   onLike: (postId: string) => void;
   onComment: (postId: string, text: string) => void;
   onShare: (postId: string) => void;
   onDelete?: (postId: string) => void;
+  onConnect?: (userId: string) => Promise<void>;
+  onDisconnect?: (connectionId: string) => Promise<void>;
+  onNavigateToChat?: (userId: string) => void;
 }
+
+// Helper function to get user stats
+const getUserStats = (userId: string, posts: Post[], connections: any[], currentUserId: string) => {
+  const userPosts = posts.filter(p => p.userId === userId).length;
+  
+  const userConnections = connections.filter((c: any) => 
+    c.status === 'accepted' && 
+    (c.userId === userId || c.connectedUserId === userId)
+  );
+  const followers = userConnections.length;
+  
+  const following = connections.filter((c: any) => 
+    c.status === 'accepted' && 
+    c.userId === userId &&
+    c.connectedUserId !== currentUserId
+  ).length;
+  
+  return { posts: userPosts, followers, following };
+};
 
 // Image Carousel Component
 const ImageCarousel: React.FC<{ images: string[]; postId: string }> = ({ images, postId }) => {
@@ -117,11 +140,14 @@ const ImageCarousel: React.FC<{ images: string[]; postId: string }> = ({ images,
   );
 };
 
-export const FeedView: React.FC<FeedViewProps> = ({ posts, currentUser, allUsers, onLike, onComment, onShare, onDelete }) => {
+export const FeedView: React.FC<FeedViewProps> = ({ posts, currentUser, allUsers, connections = [], onLike, onComment, onShare, onDelete, onConnect, onDisconnect, onNavigateToChat }) => {
   const [commentingOn, setCommentingOn] = useState<string | null>(null);
   const [commentText, setCommentText] = useState('');
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [showLikesModal, setShowLikesModal] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<User[]>([]);
+  const [viewingUserProfile, setViewingUserProfile] = useState<User | null>(null);
   const menuRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
   const userMap = useMemo(() => {
@@ -153,6 +179,35 @@ export const FeedView: React.FC<FeedViewProps> = ({ posts, currentUser, allUsers
   };
 
   const sortedPosts = [...posts].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  // Search functionality
+  useEffect(() => {
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      const filtered = allUsers.filter(user => 
+        user.id !== currentUser.id && (
+          user.name.toLowerCase().includes(query) ||
+          user.username.toLowerCase().includes(query) ||
+          user.email.toLowerCase().includes(query)
+        )
+      );
+      setSearchResults(filtered);
+    } else {
+      setSearchResults([]);
+    }
+  }, [searchQuery, allUsers, currentUser.id]);
+
+  // Get connection status and connection object for a user
+  const getConnectionInfo = (userId: string): { status: 'connected' | 'pending' | 'none', connection: any | null } => {
+    const connection = connections.find((c: any) => 
+      (c.userId === currentUser.id && c.connectedUserId === userId) ||
+      (c.userId === userId && c.connectedUserId === currentUser.id)
+    );
+    if (!connection) return { status: 'none', connection: null };
+    if (connection.status === 'accepted') return { status: 'connected', connection };
+    if (connection.status === 'pending') return { status: 'pending', connection };
+    return { status: 'none', connection: null };
+  };
 
   const handleCommentSubmit = (e: React.FormEvent, postId: string) => {
     e.preventDefault();
@@ -305,6 +360,294 @@ export const FeedView: React.FC<FeedViewProps> = ({ posts, currentUser, allUsers
 
   return (
     <div className="space-y-6 pb-32">
+      {/* Search Bar */}
+      <div className="relative">
+        <div className="relative">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+          <input
+            type="text"
+            placeholder="Search users by name, username, or email..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-12 pr-4 py-3 bg-white border-2 border-slate-200 rounded-2xl text-sm font-medium text-slate-800 placeholder:text-slate-400 focus:border-orange-500 focus:outline-none transition-all"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+            >
+              <X size={18} />
+            </button>
+          )}
+        </div>
+
+        {/* Search Results */}
+        {searchQuery.trim() && searchResults.length > 0 && (
+          <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-2xl shadow-xl z-50 max-h-96 overflow-y-auto no-scrollbar">
+            <div className="p-2">
+              {searchResults.map(user => {
+                const { status: connectionStatus } = getConnectionInfo(user.id);
+                return (
+                  <div
+                    key={user.id}
+                    className="flex items-center gap-3 p-3 hover:bg-slate-50 rounded-xl transition-all cursor-pointer"
+                    onClick={() => setViewingUserProfile(user)}
+                  >
+                    <div className="w-12 h-12 rounded-full border-2 border-slate-200 overflow-hidden bg-slate-100 flex items-center justify-center shrink-0">
+                      {user.profilePhoto ? (
+                        <img src={user.profilePhoto} alt={user.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <UserCircle size={32} className="text-slate-300" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-slate-800 truncate">{user.name}</p>
+                      <p className="text-xs text-slate-500 truncate">@{user.username}</p>
+                      {user.designation && (
+                        <p className="text-xs text-slate-400 truncate">{user.designation}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {connectionStatus === 'connected' && onNavigateToChat && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onNavigateToChat(user.id);
+                          }}
+                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                          title="Send Message"
+                        >
+                          <MessageCircle size={18} />
+                        </button>
+                      )}
+                      {connectionStatus === 'pending' && (() => {
+                        const { connection } = getConnectionInfo(user.id);
+                        return onDisconnect && connection ? (
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              if (window.confirm('Cancel connection request?')) {
+                                await onDisconnect(connection.id);
+                              }
+                            }}
+                            className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
+                            title="Cancel Request"
+                          >
+                            <X size={18} />
+                          </button>
+                        ) : (
+                          <span className="text-xs font-bold text-amber-600 px-2 py-1 bg-amber-50 rounded-lg">Pending</span>
+                        );
+                      })()}
+                      {connectionStatus === 'none' && onConnect && (
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            await onConnect(user.id);
+                          }}
+                          className="p-2 text-orange-600 hover:bg-orange-50 rounded-lg transition-all"
+                          title="Connect"
+                        >
+                          <UserPlus size={18} />
+                        </button>
+                      )}
+                      <ChevronRightIcon size={18} className="text-slate-300" />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* No Results */}
+        {searchQuery.trim() && searchResults.length === 0 && (
+          <div className="absolute top-full left-0 right-0 mt-2 bg-white border border-slate-200 rounded-2xl shadow-xl z-50 p-8 text-center">
+            <UserCircle size={48} className="text-slate-300 mx-auto mb-3" />
+            <p className="text-sm font-bold text-slate-600">No users found</p>
+            <p className="text-xs text-slate-400 mt-1">Try a different search term</p>
+          </div>
+        )}
+      </div>
+
+      {/* User Profile View Modal */}
+      {viewingUserProfile && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 animate-in fade-in"
+          onClick={() => {
+            setViewingUserProfile(null);
+            setSearchQuery('');
+          }}
+        >
+          <div 
+            className="bg-white rounded-3xl max-w-md w-full max-h-[90vh] overflow-y-auto no-scrollbar animate-in zoom-in-95"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 bg-white border-b border-slate-100 p-4 flex items-center justify-between z-10">
+              <h3 className="text-lg font-black text-slate-900 uppercase tracking-widest">Profile</h3>
+              <button
+                onClick={() => {
+                  setViewingUserProfile(null);
+                  setSearchQuery('');
+                }}
+                className="p-2 hover:bg-slate-100 rounded-xl transition-all"
+              >
+                <X size={20} className="text-slate-400" />
+              </button>
+            </div>
+
+            <div className="p-6">
+              {/* Profile Header - Instagram Style */}
+              <div className="flex gap-6 mb-6">
+                {/* Profile Picture - Left Side */}
+                <div className="flex-shrink-0">
+                  <div className="relative">
+                    <div className="w-20 h-20 rounded-full overflow-hidden bg-slate-100 flex items-center justify-center border-2 border-slate-200">
+                      {viewingUserProfile.profilePhoto ? (
+                        <img src={viewingUserProfile.profilePhoto} alt={viewingUserProfile.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <UserCircle size={64} className="text-slate-300" />
+                      )}
+                    </div>
+                    {viewingUserProfile.isEmailVerified && (
+                      <div className="absolute -bottom-1 -right-1 w-5 h-5 border-2 border-white rounded-full bg-emerald-500 flex items-center justify-center">
+                        <CheckCircle2 className="text-white" size={12} />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Profile Info - Right Side */}
+                <div className="flex-1 min-w-0">
+                  {/* Username */}
+                  <div className="mb-4">
+                    <h2 className="text-lg font-bold text-slate-900 mb-2">{viewingUserProfile.username}</h2>
+                    
+                    {/* Stats Row */}
+                    {(() => {
+                      const stats = getUserStats(viewingUserProfile.id, posts, connections, currentUser.id);
+                      return (
+                        <div className="flex gap-6 mb-4">
+                          <div className="text-center">
+                            <div className="text-base font-bold text-slate-900">{stats.posts}</div>
+                            <div className="text-xs text-slate-600">posts</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-base font-bold text-slate-900">{stats.followers}</div>
+                            <div className="text-xs text-slate-600">followers</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-base font-bold text-slate-900">{stats.following}</div>
+                            <div className="text-xs text-slate-600">following</div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {/* Full Name */}
+                    <p className="text-sm font-semibold text-slate-900 mb-1">{viewingUserProfile.name}</p>
+                    
+                    {/* Connection Buttons */}
+                    {(() => {
+                      const { status: connectionStatus, connection } = getConnectionInfo(viewingUserProfile.id);
+                      if (connectionStatus === 'connected') {
+                        return (
+                          <div className="flex gap-2 mt-3">
+                            {onNavigateToChat && (
+                              <button
+                                onClick={() => {
+                                  onNavigateToChat(viewingUserProfile.id);
+                                  setViewingUserProfile(null);
+                                  setSearchQuery('');
+                                }}
+                                className="flex-1 px-4 py-2 bg-blue-500 text-white text-sm font-semibold rounded-lg hover:bg-blue-600 transition-all flex items-center justify-center gap-2"
+                              >
+                                <MessageCircle size={16} />
+                                Send Message
+                              </button>
+                            )}
+                            {onDisconnect && connection && (
+                              <button
+                                onClick={async () => {
+                                  if (window.confirm('Are you sure you want to disconnect?')) {
+                                    await onDisconnect(connection.id);
+                                  }
+                                }}
+                                className="px-4 py-2 bg-slate-200 text-slate-800 text-sm font-semibold rounded-lg hover:bg-slate-300 transition-all"
+                              >
+                                Disconnect
+                              </button>
+                            )}
+                          </div>
+                        );
+                      } else if (connectionStatus === 'pending' && onDisconnect && connection) {
+                        return (
+                          <button
+                            onClick={async () => {
+                              if (window.confirm('Cancel connection request?')) {
+                                await onDisconnect(connection.id);
+                              }
+                            }}
+                            className="w-full mt-3 px-4 py-2 bg-amber-100 text-amber-700 text-sm font-semibold rounded-lg hover:bg-amber-200 transition-all"
+                          >
+                            Cancel Request
+                          </button>
+                        );
+                      } else if (onConnect) {
+                        return (
+                          <button
+                            onClick={async () => {
+                              await onConnect(viewingUserProfile.id);
+                            }}
+                            className="w-full mt-3 px-4 py-2 bg-blue-500 text-white text-sm font-semibold rounded-lg hover:bg-blue-600 transition-all"
+                          >
+                            Connect
+                          </button>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </div>
+                </div>
+              </div>
+
+              {/* Bio */}
+              {viewingUserProfile.bio && (
+                <div className="mb-4">
+                  <p className="text-sm text-slate-900 leading-relaxed">{viewingUserProfile.bio}</p>
+                </div>
+              )}
+
+              {/* Additional Info */}
+              {(viewingUserProfile.designation || viewingUserProfile.department || viewingUserProfile.employeeId) && (
+                <div className="pt-4 border-t border-slate-200">
+                  <div className="space-y-2 text-xs">
+                    {viewingUserProfile.designation && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-500 font-medium">Designation:</span>
+                        <span className="text-slate-900 font-semibold">{viewingUserProfile.designation}</span>
+                      </div>
+                    )}
+                    {viewingUserProfile.department && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-500 font-medium">Department:</span>
+                        <span className="text-slate-900 font-semibold">{viewingUserProfile.department}</span>
+                      </div>
+                    )}
+                    {viewingUserProfile.employeeId && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-500 font-medium">Employee ID:</span>
+                        <span className="text-slate-900 font-semibold">{viewingUserProfile.employeeId}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {sortedPosts.map(post => {
         const isLiked = post.likes.includes(currentUser.id);
         const ratioClass = post.ratio === '16:9' ? 'aspect-[16/9]' : post.ratio === '3:4' ? 'aspect-[3/4]' : 'aspect-square';

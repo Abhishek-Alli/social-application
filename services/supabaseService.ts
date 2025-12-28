@@ -56,6 +56,7 @@ const mapDbUserToUser = (data: any): User => ({
   profilePhoto: data.profile_photo || null,
   bio: data.bio || null,
   backgroundImage: data.background_image || null,
+  screenLockPassword: data.screen_lock_password || null,
   password: data.password || null,
   isTwoStepEnabled: data.is_two_step_enabled || false,
   isEmailVerified: data.is_email_verified || false,
@@ -130,25 +131,26 @@ export const userService = {
     if (updates.profilePhoto !== undefined) updateData.profile_photo = updates.profilePhoto;
     if (updates.bio !== undefined) updateData.bio = updates.bio;
     if (updates.backgroundImage !== undefined) updateData.background_image = updates.backgroundImage;
+    if (updates.screenLockPassword !== undefined) updateData.screen_lock_password = updates.screenLockPassword;
     if (updates.isTwoStepEnabled !== undefined) updateData.is_two_step_enabled = updates.isTwoStepEnabled;
     if (updates.isEmailVerified !== undefined) updateData.is_email_verified = updates.isEmailVerified;
     if (updates.telegramUserId !== undefined) updateData.telegram_user_id = updates.telegramUserId;
     if (updates.telegramToken !== undefined) updateData.telegram_token = updates.telegramToken;
     if (updates.password !== undefined) updateData.password = updates.password;
     
-    // Remove camelCase fields that were mapped (but keep password as it's already in the correct format)
+    // Remove camelCase fields that were mapped (but keep password, bio, screenLockPassword as they're already in the correct format)
     delete updateData.parentId;
     delete updateData.projectId;
     delete updateData.employeeId;
     delete updateData.subDepartment;
     delete updateData.contactNo;
     delete updateData.profilePhoto;
-    delete updateData.bio;
     delete updateData.backgroundImage;
     delete updateData.isTwoStepEnabled;
     delete updateData.isEmailVerified;
     delete updateData.telegramUserId;
     delete updateData.telegramToken;
+    delete updateData.screenLockPassword; // Remove camelCase, already mapped to screen_lock_password
     
     const { data, error } = await supabase
       .from('users')
