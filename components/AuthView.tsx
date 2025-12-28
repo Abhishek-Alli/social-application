@@ -570,6 +570,20 @@ export const AuthView: React.FC<AuthViewProps> = ({
               </div>
             );
           })()}
+
+          {/* Logout Button */}
+          <div className="mt-6 mb-4">
+            <button
+              onClick={() => {
+                if (window.confirm('Are you sure you want to log out?')) {
+                  onLogout();
+                }
+              }}
+              className="w-full py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-sm uppercase tracking-wide transition-all flex items-center justify-center gap-2"
+            >
+              <LogOut size={18} /> Logout
+            </button>
+          </div>
         </div>
 
         {/* User Profile View Modal */}
