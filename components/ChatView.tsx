@@ -514,43 +514,15 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
   // Check and request permissions with better error handling
   const requestMediaPermissions = async (isVideo: boolean): Promise<MediaStream> => {
-    // First, check current permission status
-    let cameraStatus = 'prompt';
-    let micStatus = 'prompt';
+    // Check if getUserMedia is available
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      const errorMessage = 'Camera/microphone access is not available. ' +
+        (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+          ? 'This feature requires HTTPS. Please access the app over a secure connection.'
+          : 'Your browser may not support camera/microphone access. Please use a modern browser like Chrome, Firefox, or Safari.');
+      throw new Error(errorMessage);
+    }
     
-    try {
-      if (navigator.permissions && navigator.permissions.query) {
-        if (isVideo) {
-          try {
-            const cameraPermission = await (navigator.permissions as any).query({ name: 'camera' });
-            cameraStatus = cameraPermission?.state || 'prompt';
-          } catch (e) {
-            console.warn('Could not check camera permission:', e);
-          }
-        }
-        try {
-          const micPermission = await (navigator.permissions as any).query({ name: 'microphone' });
-          micStatus = micPermission?.state || 'prompt';
-        } catch (e) {
-          console.warn('Could not check microphone permission:', e);
-        }
-      }
-    } catch (e) {
-      console.warn('Permission API not available:', e);
-    }
-
-    // If permissions are denied, show helpful message
-    if (cameraStatus === 'denied' && isVideo) {
-      setPermissionError('CAMERA_DENIED');
-      setShowPermissionModal(true);
-      throw new Error('CAMERA_DENIED');
-    }
-    if (micStatus === 'denied') {
-      setPermissionError('MICROPHONE_DENIED');
-      setShowPermissionModal(true);
-      throw new Error('MICROPHONE_DENIED');
-    }
-
     // Try with advanced constraints first
     let constraints: MediaStreamConstraints = {
       audio: {
@@ -576,12 +548,21 @@ export const ChatView: React.FC<ChatViewProps> = ({
           audio: true,
           video: isVideo ? true : false
         };
-        return await navigator.mediaDevices.getUserMedia(constraints);
+        try {
+          return await navigator.mediaDevices.getUserMedia(constraints);
+        } catch (retryError: any) {
+          // Handle permission errors from retry
+          if (retryError.name === 'NotAllowedError' || retryError.name === 'PermissionDeniedError') {
+            setPermissionError(isVideo ? 'CAMERA_DENIED' : 'MICROPHONE_DENIED');
+            setShowPermissionModal(true);
+          }
+          throw retryError;
+        }
       }
       
       // Handle permission errors
       if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-        setPermissionError(error.name);
+        setPermissionError(isVideo ? 'CAMERA_DENIED' : 'MICROPHONE_DENIED');
         setShowPermissionModal(true);
       }
       throw error;
@@ -682,64 +663,25 @@ export const ChatView: React.FC<ChatViewProps> = ({
       onStartCall(type, targetId, false);
     } catch (error: any) {
       console.error('Failed to start call:', error);
-      let errorMessage = '';
-      let showInstructions = false;
+      
+      // Check if getUserMedia is not available
+      if (error.message && error.message.includes('not available') || 
+          error.message && error.message.includes('HTTPS')) {
+        alert(error.message);
+        if (webrtcRef.current) {
+          webrtcRef.current.endCall();
+          webrtcRef.current = null;
+        }
+        setIsCallActive(false);
+        setShowCallOverlay(null);
+        return;
+      }
       
       if (error.message === 'CAMERA_DENIED' || error.message === 'MICROPHONE_DENIED' || 
           error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-        errorMessage = 'Camera/Microphone Access Denied\n\n';
-        showInstructions = true;
-        
-        const browser = navigator.userAgent.includes('Chrome') ? 'Chrome' :
-                       navigator.userAgent.includes('Firefox') ? 'Firefox' :
-                       navigator.userAgent.includes('Safari') ? 'Safari' : 'your browser';
-        
-        if (browser === 'Chrome') {
-          errorMessage += 'To fix this in Chrome:\n' +
-            '1. Click the lock icon (🔒) in the address bar\n' +
-            '2. Find "Camera" and "Microphone" in the list\n' +
-            '3. Change them from "Block" to "Allow"\n' +
-            '4. Refresh the page and try again\n\n' +
-            'OR go to: Settings → Privacy and security → Site settings → Camera/Microphone\n' +
-            'Find this site and change to "Allow"';
-        } else if (browser === 'Firefox') {
-          errorMessage += 'To fix this in Firefox:\n' +
-            '1. Click the shield icon in the address bar\n' +
-            '2. Click "Permissions" → "Use Camera" and "Use Microphone"\n' +
-            '3. Select "Allow" for both\n' +
-            '4. Refresh the page and try again';
-        } else if (browser === 'Safari') {
-          errorMessage += 'To fix this in Safari:\n' +
-            '1. Go to Safari → Settings → Websites\n' +
-            '2. Select "Camera" and "Microphone"\n' +
-            '3. Find this website and set to "Allow"\n' +
-            '4. Refresh the page and try again';
-        } else {
-          errorMessage += 'To fix this:\n' +
-            '1. Check your browser\'s site permissions\n' +
-            '2. Allow camera and microphone for this site\n' +
-            '3. Refresh the page and try again';
-        }
-      } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
-        errorMessage = 'No camera or microphone found.\n\n' +
-          'Please:\n' +
-          '1. Make sure your camera/microphone is connected\n' +
-          '2. Check that no other application is using them\n' +
-          '3. Try refreshing the page';
-      } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
-        errorMessage = 'Camera/microphone is already in use.\n\n' +
-          'Please close other applications using your camera/microphone and try again.';
-      } else if (error.message) {
-        errorMessage = error.message;
-      } else {
-        errorMessage = 'Failed to access camera/microphone.\n\n' +
-          'Please check your browser permissions and make sure your camera/microphone is connected.';
-      }
-      
-      alert(errorMessage);
-      if (showInstructions) {
-        // Try to open browser settings if possible
-        console.log('User needs to manually enable permissions in browser settings');
+        // Show permission modal instead of alert
+        setPermissionError(error.message === 'CAMERA_DENIED' ? 'CAMERA_DENIED' : 'MICROPHONE_DENIED');
+        setShowPermissionModal(true);
       }
       
       if (webrtcRef.current) {
@@ -832,60 +774,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
       // The offer will be handled in handleCallSignal
     } catch (error: any) {
       console.error('Failed to answer call:', error);
-      let errorMessage = '';
-      let showInstructions = false;
       
       if (error.message === 'CAMERA_DENIED' || error.message === 'MICROPHONE_DENIED' || 
           error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-        errorMessage = 'Camera/Microphone Access Denied\n\n';
-        showInstructions = true;
-        
-        const browser = navigator.userAgent.includes('Chrome') ? 'Chrome' :
-                       navigator.userAgent.includes('Firefox') ? 'Firefox' :
-                       navigator.userAgent.includes('Safari') ? 'Safari' : 'your browser';
-        
-        if (browser === 'Chrome') {
-          errorMessage += 'To fix this in Chrome:\n' +
-            '1. Click the lock icon (🔒) in the address bar\n' +
-            '2. Find "Camera" and "Microphone" in the list\n' +
-            '3. Change them from "Block" to "Allow"\n' +
-            '4. Refresh the page and try again\n\n' +
-            'OR go to: Settings → Privacy and security → Site settings → Camera/Microphone\n' +
-            'Find this site and change to "Allow"';
-        } else if (browser === 'Firefox') {
-          errorMessage += 'To fix this in Firefox:\n' +
-            '1. Click the shield icon in the address bar\n' +
-            '2. Click "Permissions" → "Use Camera" and "Use Microphone"\n' +
-            '3. Select "Allow" for both\n' +
-            '4. Refresh the page and try again';
-        } else if (browser === 'Safari') {
-          errorMessage += 'To fix this in Safari:\n' +
-            '1. Go to Safari → Settings → Websites\n' +
-            '2. Select "Camera" and "Microphone"\n' +
-            '3. Find this website and set to "Allow"\n' +
-            '4. Refresh the page and try again';
-        } else {
-          errorMessage += 'To fix this:\n' +
-            '1. Check your browser\'s site permissions\n' +
-            '2. Allow camera and microphone for this site\n' +
-            '3. Refresh the page and try again';
-        }
-      } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
-        errorMessage = 'No camera or microphone found.\n\n' +
-          'Please:\n' +
-          '1. Make sure your camera/microphone is connected\n' +
-          '2. Check that no other application is using them';
-      } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
-        errorMessage = 'Camera/microphone is already in use.\n\n' +
-          'Please close other applications using your camera/microphone and try again.';
-      } else if (error.message) {
-        errorMessage = error.message;
-      } else {
-        errorMessage = 'Failed to access camera/microphone.\n\n' +
-          'Please check your browser permissions and make sure your camera/microphone is connected.';
+        // Show permission modal instead of alert
+        setPermissionError(error.message === 'CAMERA_DENIED' ? 'CAMERA_DENIED' : 'MICROPHONE_DENIED');
+        setShowPermissionModal(true);
       }
       
-      alert(errorMessage);
       if (webrtcRef.current) {
         webrtcRef.current.endCall();
         webrtcRef.current = null;
@@ -1220,10 +1116,13 @@ export const ChatView: React.FC<ChatViewProps> = ({
 
   // Permission Modal
   if (showPermissionModal) {
+    // Better browser detection
     const isChrome = /Chrome/.test(navigator.userAgent) && /Google Inc/.test(navigator.vendor);
     const isFirefox = /Firefox/.test(navigator.userAgent);
-    const isSafari = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent);
+    // Safari detection: Must have Safari but NOT Chrome (Chrome on iOS has Safari in UA)
+    const isSafari = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent) && !/CriOS/.test(navigator.userAgent);
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
     
     return (
       <div className="fixed inset-0 z-[200] bg-slate-900/95 backdrop-blur-sm flex items-center justify-center p-6">
@@ -1320,15 +1219,19 @@ export const ChatView: React.FC<ChatViewProps> = ({
                   <>
                     <div className="flex items-start gap-2">
                       <span className="font-bold text-orange-600">1.</span>
-                      <p>Go to: <strong>Safari → Preferences → Websites</strong></p>
+                      <p>Go to: <strong>Safari → Settings → Websites</strong> {isIOS ? '(iOS)' : '(or Safari → Preferences → Websites on Mac)'}</p>
                     </div>
                     <div className="flex items-start gap-2">
                       <span className="font-bold text-orange-600">2.</span>
-                      <p>Select <strong>"Camera"</strong> and <strong>"Microphone"</strong></p>
+                      <p>Select <strong>"Camera"</strong> and <strong>"Microphone"</strong> from the left sidebar</p>
                     </div>
                     <div className="flex items-start gap-2">
                       <span className="font-bold text-orange-600">3.</span>
-                      <p>Set this website to <strong>"Allow"</strong></p>
+                      <p>Find this website ({window.location.hostname || 'this site'}) and set to <strong>"Allow"</strong></p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-orange-600">4.</span>
+                      <p>Refresh the page and try again</p>
                     </div>
                   </>
                 ) : (
