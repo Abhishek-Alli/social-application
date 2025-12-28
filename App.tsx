@@ -2344,47 +2344,35 @@ const App: React.FC = () => {
     try {
       console.log('Clearing chat history:', { receiverId, groupId, clearForEveryone });
       
-      // Get all messages that will be deleted
-      const messagesToDelete = messages.filter(m => {
-        if (groupId) {
-          return m.groupId === groupId;
-        } else if (receiverId) {
-          return (m.senderId === currentUser.id && m.receiverId === receiverId) ||
-                 (m.senderId === receiverId && m.receiverId === currentUser.id);
-        }
-        return false;
-      });
-
-      console.log(`Deleting ${messagesToDelete.length} messages from database`);
-
-      // Delete all messages from database
-      await messageService.deleteByConversation(
-        currentProjectId,
-        currentUser.id,
-        receiverId,
-        groupId,
-        clearForEveryone
-      );
-
-      console.log('Chat history cleared successfully from database');
-
-      // Remove messages from UI
-      setMessages(prev => {
-        if (groupId) {
-          return prev.filter(m => m.groupId !== groupId);
-        } else if (receiverId) {
-          return prev.filter(m => 
-            !((m.senderId === currentUser.id && m.receiverId === receiverId) ||
-              (m.senderId === receiverId && m.receiverId === currentUser.id))
-          );
-        }
-        return prev;
-      });
-
-      // Real-time subscription will also update, but we've already updated locally
+      if (clearForEveryone) {
+        // Delete all messages from database - real-time subscription will sync to all users
+        await messageService.deleteByConversation(
+          currentProjectId,
+          currentUser.id,
+          receiverId,
+          groupId,
+          true
+        );
+        console.log('Chat history cleared from database (for everyone)');
+        // Don't optimistically update - let real-time subscription handle it for consistency
+      } else {
+        // Clear only for current user - remove from local state only
+        setMessages(prev => {
+          if (groupId) {
+            return prev.filter(m => m.groupId !== groupId);
+          } else if (receiverId) {
+            return prev.filter(m => 
+              !((m.senderId === currentUser.id && m.receiverId === receiverId) ||
+                (m.senderId === receiverId && m.receiverId === currentUser.id))
+            );
+          }
+          return prev;
+        });
+        console.log('Chat history cleared locally (for current user only)');
+      }
     } catch (error) {
       console.error('Failed to clear chat history:', error);
-      alert('Failed to clear chat history. Please check console for details.');
+      alert('Failed to clear chat history. Please try again.');
     }
   };
 
