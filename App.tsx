@@ -2324,9 +2324,17 @@ const App: React.FC = () => {
         setMessages(prev => prev.filter(m => m.id !== messageId));
         console.log('Message deleted locally (for sender only)');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to delete message:', error);
-      alert('Failed to delete message. Please try again.');
+      
+      // Provide specific error messages based on error type
+      if (error?.message?.includes('fetch') || error?.message?.includes('network') || error?.code === 'ECONNREFUSED' || error?.message?.includes('Failed to fetch')) {
+        alert('Failed to connect to database. Please check your internet connection and try again.');
+      } else if (error?.message?.includes('JWT') || error?.message?.includes('auth')) {
+        alert('Authentication error. Please log in again.');
+      } else {
+        alert('Failed to delete message. Please try again.');
+      }
     }
   };
 
