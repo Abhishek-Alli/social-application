@@ -76,3 +76,4 @@ Your listed permissions are **correct and sufficient** for basic calling functio
 - Configure WebView properly if embedding the app
 - Ensure HTTPS is used in production
 
+

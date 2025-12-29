@@ -1675,9 +1675,10 @@ const App: React.FC = () => {
       }
       
       // Real-time subscription will update the state automatically
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to create task:', error);
-      alert('Failed to create task. Please try again.');
+      const errorMessage = error?.message || 'Unknown error occurred';
+      alert(`Failed to create task: ${errorMessage}. Please check the console for more details.`);
     }
   };
 

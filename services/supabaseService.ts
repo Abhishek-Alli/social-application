@@ -269,36 +269,66 @@ export const taskService = {
   },
 
   async create(task: Omit<Task, 'id' | 'createdAt'>): Promise<Task> {
+    // Generate a unique ID for the task
+    const taskId = 't' + Date.now().toString() + Math.random().toString(36).substring(2, 11);
+    
     const insertData: any = {
+      id: taskId,
       project_id: task.projectId,
       title: task.title,
-      description: task.description,
+      description: task.description || null,
       priority: task.priority,
-      completed: task.completed,
-      category: task.category,
-      assigned_by: task.assignedBy,
-      assigned_to_array: task.assignedTo || [],
-      due_date: task.dueDate,
-      sub_tasks: task.subTasks,
+      completed: task.completed || false,
+      category: task.category || null,
+      assigned_by: task.assignedBy || null,
+      due_date: task.dueDate || null,
+      sub_tasks: task.subTasks || [],
       created_at: new Date().toISOString()
     };
     
-    const { data, error } = await supabase
-      .from('tasks')
-      .insert(insertData)
-      .select()
-      .single();
-    if (error) throw error;
+    // Handle assigned users - use assigned_to (single user) for backward compatibility
+    // Don't include assigned_to_array unless the column exists in the database
+    const assignedUsers = task.assignedTo || [];
+    if (assignedUsers.length > 0) {
+      insertData.assigned_to = assignedUsers[0] || null;
+    } else {
+      insertData.assigned_to = null;
+    }
     
-    return {
-      ...data,
-      projectId: data.project_id || data.projectId,
-      dueDate: data.due_date || data.dueDate,
-      createdAt: data.created_at || data.createdAt,
-      subTasks: data.sub_tasks || data.subTasks || [],
-      assignedBy: data.assigned_by || data.assignedBy,
-      assignedTo: data.assigned_to_array || (data.assigned_to ? [data.assigned_to] : [])
-    };
+    try {
+      console.log('Creating task with data:', JSON.stringify(insertData, null, 2));
+      const { data, error } = await supabase
+        .from('tasks')
+        .insert(insertData)
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('Task creation error:', error);
+        throw error;
+      }
+      
+      if (!data) {
+        throw new Error('No data returned from task creation');
+      }
+      
+      return {
+        ...data,
+        projectId: data.project_id || data.projectId,
+        dueDate: data.due_date || data.dueDate,
+        createdAt: data.created_at || data.createdAt,
+        subTasks: data.sub_tasks || data.subTasks || [],
+        assignedBy: data.assigned_by || data.assignedBy,
+        assignedTo: data.assigned_to_array || (data.assigned_to ? [data.assigned_to] : [])
+      };
+    } catch (error: any) {
+      // Re-throw with more context if it's a network error
+      if (error?.message?.includes('Failed to fetch') || error?.name === 'TypeError') {
+        console.error('Network error during task creation. Check your Supabase connection.');
+        throw new Error(`Failed to connect to database: ${error.message}`);
+      }
+      throw error;
+    }
   },
 
   async update(id: string, updates: Partial<Task>): Promise<Task> {
@@ -355,17 +385,31 @@ export const noteService = {
   },
 
   async create(note: Omit<Note, 'id' | 'createdAt'>): Promise<Note> {
+    // Generate a unique ID for the note
+    const noteId = 'n' + Date.now().toString() + Math.random().toString(36).substring(2, 11);
+    
+    const insertData: any = {
+      id: noteId,
+      project_id: note.projectId,
+      title: note.title,
+      content: note.content || null,
+      color: note.color || null,
+      created_at: new Date().toISOString()
+    };
+    
     const { data, error } = await supabase
       .from('notes')
-      .insert({
-        ...note,
-        project_id: note.projectId,
-        created_at: new Date().toISOString()
-      })
+      .insert(insertData)
       .select()
       .single();
-    if (error) throw error;
-    return data;
+    if (error) {
+      console.error('Note creation error:', error);
+      throw error;
+    }
+    return {
+      ...data,
+      projectId: data.project_id || data.projectId
+    };
   },
 
   async update(id: string, updates: Partial<Note>): Promise<Note> {
