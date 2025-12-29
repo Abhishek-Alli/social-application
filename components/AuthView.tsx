@@ -1,11 +1,11 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Role, User } from '../types';
+import { Role, User, Post } from '../types';
 import { 
   LogIn, ShieldCheck, UserCircle, LogOut, AtSign, Save, 
   UserPlus, Users, ChevronRight, X, Camera, Briefcase, 
   Key, Phone, Mail, Calendar, Hash, Send, Lock, Shield, 
-  QrCode, Info, Fingerprint, ShieldAlert, CheckCircle2, Megaphone, Download, Edit, Settings, HelpCircle, Clock, Check, Image as ImageIcon, ZoomIn, ZoomOut, Move, Trash2
+  QrCode, Info, Fingerprint, ShieldAlert, CheckCircle2, Megaphone, Download, Edit, Settings, HelpCircle, Clock, Check, Image as ImageIcon, ZoomIn, ZoomOut, Move, Trash2, Heart, MessageSquare, Share2, LayoutGrid, Video
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
@@ -65,6 +65,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
   
   const [isAddingSub, setIsAddingSub] = useState(false);
   const [showAllPosts, setShowAllPosts] = useState(false);
+  const [postsTab, setPostsTab] = useState<'posts' | 'reels'>('posts');
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSettingScreenLock, setIsSettingScreenLock] = useState(false);
@@ -496,6 +497,139 @@ export const AuthView: React.FC<AuthViewProps> = ({
               </div>
             </div>
           </div>
+
+          {/* My Posts Section */}
+          {userPosts && userPosts.length > 0 && (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 mb-4 overflow-hidden">
+              {/* Tabs */}
+              <div className="flex border-b border-slate-200">
+                <button
+                  onClick={() => setPostsTab('posts')}
+                  className={`flex-1 py-3 px-4 flex items-center justify-center gap-2 font-bold text-sm transition-all ${
+                    postsTab === 'posts'
+                      ? 'text-slate-900 border-b-2 border-slate-900'
+                      : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  <LayoutGrid size={18} />
+                  Posts
+                </button>
+                <button
+                  onClick={() => setPostsTab('reels')}
+                  className={`flex-1 py-3 px-4 flex items-center justify-center gap-2 font-bold text-sm transition-all ${
+                    postsTab === 'reels'
+                      ? 'text-slate-900 border-b-2 border-slate-900'
+                      : 'text-slate-400 hover:text-slate-600'
+                  }`}
+                >
+                  <Video size={18} />
+                  Reels
+                </button>
+              </div>
+
+              {/* Posts Grid */}
+              {postsTab === 'posts' && (() => {
+                const imagePosts = userPosts.filter((post: Post) => !post.video && (post.image || (post.images && post.images.length > 0)));
+                if (imagePosts.length === 0) {
+                  return (
+                    <div className="p-12 text-center">
+                      <ImageIcon size={48} className="text-slate-300 mx-auto mb-3" />
+                      <p className="text-sm text-slate-500 font-bold">No posts yet</p>
+                    </div>
+                  );
+                }
+                return (
+                  <div className="grid grid-cols-3 gap-0.5 p-0.5">
+                    {imagePosts.map((post: Post) => (
+                      <div
+                        key={post.id}
+                        className="aspect-square relative group cursor-pointer bg-slate-100 overflow-hidden"
+                        onClick={() => {
+                          // You can add a modal to view full post here
+                        }}
+                      >
+                        {post.images && post.images.length > 0 ? (
+                          <img 
+                            src={post.images[0]} 
+                            alt="Post" 
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                          />
+                        ) : post.image ? (
+                          <img 
+                            src={post.image} 
+                            alt="Post" 
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                          />
+                        ) : null}
+                        {post.images && post.images.length > 1 && (
+                          <div className="absolute top-2 right-2">
+                            <LayoutGrid size={16} className="text-white drop-shadow-lg" />
+                          </div>
+                        )}
+                        {/* Overlay on hover */}
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all flex items-center justify-center gap-4 opacity-0 group-hover:opacity-100">
+                          <div className="flex items-center gap-1.5 text-white">
+                            <Heart size={18} className="fill-white" />
+                            <span className="text-sm font-bold">{post.likes?.length || 0}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-white">
+                            <MessageSquare size={18} className="fill-white" />
+                            <span className="text-sm font-bold">{post.comments?.length || 0}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+
+              {/* Reels Grid */}
+              {postsTab === 'reels' && (() => {
+                const videoPosts = userPosts.filter((post: Post) => post.video);
+                if (videoPosts.length === 0) {
+                  return (
+                    <div className="p-12 text-center">
+                      <Video size={48} className="text-slate-300 mx-auto mb-3" />
+                      <p className="text-sm text-slate-500 font-bold">No reels yet</p>
+                    </div>
+                  );
+                }
+                return (
+                  <div className="grid grid-cols-3 gap-0.5 p-0.5">
+                    {videoPosts.map((post: Post) => (
+                      <div
+                        key={post.id}
+                        className="aspect-square relative group cursor-pointer bg-slate-100 overflow-hidden"
+                        onClick={() => {
+                          // You can add a modal to view full reel here
+                        }}
+                      >
+                        <video 
+                          src={post.video} 
+                          className="w-full h-full object-cover"
+                          muted
+                          playsInline
+                        />
+                        {/* Play icon overlay */}
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                          <div className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center">
+                            <Video size={24} className="text-white ml-1" />
+                          </div>
+                        </div>
+                        {/* Stats overlay */}
+                        <div className="absolute bottom-2 left-2 right-2 flex items-center gap-3 text-white text-xs font-bold drop-shadow-lg">
+                          <div className="flex items-center gap-1">
+                            <Heart size={14} className="fill-white" />
+                            <span>{post.likes?.length || 0}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
 
           {/* User Suggestions Section */}
           {(() => {
